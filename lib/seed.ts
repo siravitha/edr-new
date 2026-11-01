@@ -1,4 +1,5 @@
 import type { CatalogProposal } from "../components/asset-catalog-workspace";
+import type { FlowState } from "./procurement-flow";
 import type { NumberingState } from "./asset-numbering";
 import type { PlanningState } from "./planning";
 import type { DemoUser } from "./users.mjs";
@@ -18,7 +19,7 @@ export const roles = [
   { id: "executive", name: "ผู้บริหาร" }, { id: "warehouse", name: "เจ้าหน้าที่คลัง" },
   { id: "nurse", name: "พยาบาล · ICU" }, { id: "strategy", name: "ยุทธศาสตร์" },
   { id: "procurement", name: "พัสดุ" }, { id: "finance", name: "การเงิน" },
-  { id: "accounting", name: "บัญชี" }, { id: "auditor", name: "ผู้ตรวจสอบ" },
+  { id: "legal", name: "นิติกร" }, { id: "accounting", name: "บัญชี" }, { id: "auditor", name: "ผู้ตรวจสอบ" },
   { id: "admin", name: "ผู้ดูแลระบบ · จำลอง" }
 ];
 export type Asset = {
@@ -28,6 +29,7 @@ export type Asset = {
   depreciation: number; verified: boolean; poNo: string; critical: boolean;
 };
 export type DemoState = {
+  procurementFlow?: FlowState;
   planning?: PlanningState;
   assetNumbering?: NumberingState;
   catalogProposals?: CatalogProposal[];
