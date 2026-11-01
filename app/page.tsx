@@ -11,7 +11,7 @@ import { createMasterData } from "@/lib/master-data.mjs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { categories, createSeed, HOSPITAL, paymentLabels, roles, statusLabels, wards, type Asset, type DemoState } from "@/lib/seed";
-import { loadState, saveState } from "@/lib/storage";
+import { loadState, saveState, type PlanningFileWrite } from "@/lib/storage";
 import { transitionAsset, transitionPayment } from "@/lib/domain.mjs";
 import { parseAssetCsv, toCsv } from "@/lib/csv.mjs";
 
@@ -134,11 +134,11 @@ export default function Home() {
   const payment = data.payments.find(p => p.id === paymentId);
 
   function notify(message: string, error = false) { setToast({ message, error }); }
-  async function commit(next: DemoState) {
+  async function commit(next: DemoState, file?: PlanningFileWrite) {
     if (!editable || writingRef.current || data !== stateRef.current) { notify("มีรายการกำลังบันทึก กรุณารอแล้วลองอีกครั้ง", true); return false; }
     writingRef.current = true;
     setBusy(true);
-    try { await saveState(next); stateRef.current = next; setData(next); return true; }
+    try { await saveState(next, file); stateRef.current = next; setData(next); return true; }
     catch { setStorageError(true); notify("บันทึกในเครื่องไม่สำเร็จ รายการยังไม่ถูกยืนยัน", true); return false; }
     finally { writingRef.current = false; setBusy(false); }
   }
@@ -287,7 +287,7 @@ export default function Home() {
       {page === "finance-payments" && <><div className="demo-banner"><FileText size={17}/><span>สถานะคำขอเบิกจ่ายแยกจาก PO · ทดลองส่งคืนด้วยบทบาทการเงิน แล้วแก้ไขส่งใหม่ด้วยบทบาทพัสดุ</span></div><Card><CardHeader><div><CardTitle>คำขอเบิกจ่าย</CardTitle><p className="panel-subtitle">เปลี่ยนบทบาทจำลองด้านบนเพื่อทดลองแต่ละขั้นตอน</p></div></CardHeader><div className="table-wrap"><table className="data-table"><thead><tr><th>คำขอ / รายการ</th><th>PO</th><th>จำนวนเงิน</th><th>สถานะคำขอ</th><th>รุ่น</th><th>ดำเนินการ</th></tr></thead><tbody>{data.payments.map(p => <tr key={p.id}><td><strong>{p.claimNo}</strong><div className="muted">{p.title}</div></td><td>{p.poNo}<br/><span className="badge neutral">ปิด PO แล้ว</span></td><td>฿{money(p.amount)}</td><td><span className={`badge ${tone(p.status)}`}>{paymentLabels[p.status]}</span>{p.returnReason && <div className="muted">{p.returnReason}</div>}</td><td>r{p.revision}</td><td><Button variant="secondary" size="sm" onClick={() => { setPaymentId(p.id); setReason(""); setEvidence(false); setSignature(false); setModal("payment"); }}>ตรวจรายการ</Button></td></tr>)}</tbody></table></div></Card></>}
 
       {page === "procurement" && <LifecycleWorkspace/>}
-      {selectedPlanningSection && <PlanningWorkspace page={selectedPlanningSection.id} state={data.planning} departments={masterData.departments} profile={data.hospitalProfile} editable={editable} offline={isOffline} onChange={async planning=>await commit({...data,planning})}/>}
+      {selectedPlanningSection && <PlanningWorkspace page={selectedPlanningSection.id} state={data.planning} departments={masterData.departments} profile={data.hospitalProfile} editable={editable} offline={isOffline} onChange={async (planning,file)=>await commit({...data,planning},file)}/>}
 
       {selectedReportSection && <Card><CardHeader><CardTitle>{selectedReportSection.label}</CardTitle></CardHeader><CardContent><div className="empty-state"><FileText size={30}/><p>ยังไม่ได้เพิ่มรายงานในหมวดนี้</p><small>เตรียมหมวดรายงานตามฝ่ายไว้แล้ว</small></div></CardContent></Card>}
 
