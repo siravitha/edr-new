@@ -1,3 +1,4 @@
+import type { PlanningState } from "./planning";
 import type { DemoUser } from "./users.mjs";
 import type { MasterState, HospitalProfile } from "./master-data.mjs";
 export const HOSPITAL = "UTH";
@@ -24,6 +25,7 @@ export type Asset = {
   depreciation: number; verified: boolean; poNo: string; critical: boolean;
 };
 export type DemoState = {
+  planning?: PlanningState;
   assets: Asset[]; receipts: any[]; conflicts: any[]; audit: any[];
   queue: any[]; payments: any[]; documents: any[]; lastSynced: string | null;
   users?: DemoUser[];
