@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Activity, ArrowDownToLine, ArrowRight, ArrowUpRight, Bell, Box, Building2, ChartNoAxesCombined, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, ClipboardCheck, ClipboardList, FileCheck2, FileText, FolderClock, HeartPulse, History, Layers3, Menu, MoreHorizontal, Package, Plus, QrCode, RefreshCw, Search, Settings2, ShieldCheck, Upload, Wallet, Wifi, WifiOff, X } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { LifecycleWorkspace } from "@/components/lifecycle-workspace";
+import { UserManagement } from "@/components/user-management";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { categories, createSeed, HOSPITAL, paymentLabels, roles, statusLabels, wards, type Asset, type DemoState } from "@/lib/seed";
@@ -11,7 +12,7 @@ import { loadState, saveState } from "@/lib/storage";
 import { transitionAsset, transitionPayment } from "@/lib/domain.mjs";
 import { parseAssetCsv, toCsv } from "@/lib/csv.mjs";
 
-type Page = "dashboard" | "assets" | "procurement" | "finance" | "documents" | "sync" | "audit" | "integrations";
+type Page = "dashboard" | "assets" | "procurement" | "finance" | "documents" | "sync" | "audit" | "integrations" | "users";
 const nav = [
   { id: "dashboard", label: "ภาพรวมผู้บริหาร", icon: ChartNoAxesCombined },
   { id: "assets", label: "ทะเบียนครุภัณฑ์", icon: Box },
@@ -20,7 +21,8 @@ const nav = [
   { id: "documents", label: "เอกสารและหลักฐาน", icon: FileCheck2 },
   { id: "sync", label: "คิวซิงก์และข้อขัดแย้ง", icon: RefreshCw },
   { id: "audit", label: "ประวัติการดำเนินการ", icon: History },
-  { id: "integrations", label: "การเชื่อมต่อระบบ", icon: Settings2 }
+  { id: "integrations", label: "การเชื่อมต่อระบบ", icon: Settings2 },
+  { id: "users", label: "จัดการผู้ใช้งาน", icon: ShieldCheck }
 ] as const;
 const money = (v: number) => new Intl.NumberFormat("th-TH", { maximumFractionDigits: 0 }).format(v);
 const wardName = (id: string) => wards.find(w => w.id === id)?.name ?? id;
@@ -252,6 +254,8 @@ export default function Home() {
       {page === "finance" && <><div className="demo-banner"><FileText size={17}/><span>สถานะคำขอเบิกจ่ายแยกจาก PO · ทดลองส่งคืนด้วยบทบาทการเงิน แล้วแก้ไขส่งใหม่ด้วยบทบาทพัสดุ</span></div><Card><CardHeader><div><CardTitle>คำขอเบิกจ่ายและการติดตามบัญชี</CardTitle><p className="panel-subtitle">เปลี่ยนบทบาทจำลองด้านบนเพื่อทดลองแต่ละขั้นตอน</p></div></CardHeader><div className="table-wrap"><table className="data-table"><thead><tr><th>คำขอ / รายการ</th><th>PO</th><th>จำนวนเงิน</th><th>สถานะคำขอ</th><th>รุ่น</th><th>ดำเนินการ</th></tr></thead><tbody>{data.payments.map(p => <tr key={p.id}><td><strong>{p.claimNo}</strong><div className="muted">{p.title}</div></td><td>{p.poNo}<br/><span className="badge neutral">ปิด PO แล้ว</span></td><td>฿{money(p.amount)}</td><td><span className={`badge ${tone(p.status)}`}>{paymentLabels[p.status]}</span>{p.returnReason && <div className="muted">{p.returnReason}</div>}</td><td>r{p.revision}</td><td><Button variant="secondary" size="sm" onClick={() => { setPaymentId(p.id); setReason(""); setEvidence(false); setSignature(false); setModal("payment"); }}>ตรวจรายการ</Button></td></tr>)}</tbody></table></div></Card><div className="connection-card section-gap-top"><ShieldCheck size={22}/><h3>การลงบัญชีและค่าเสื่อม</h3><p className="muted">ต้นแบบแสดงมูลค่าจากราคาทุนและค่าเสื่อมจำลอง ยังไม่สร้างสมุดรายวันหรือส่งรายการไป GFMIS ระบบบริการมีสคีมารองรับสำหรับพัฒนาต่อ</p></div></>}
 
       {page === "procurement" && <LifecycleWorkspace/>}
+
+      {page === "users" && <UserManagement users={data.users} actorRole={role} editable={editable} switchToAdmin={()=>setRole("admin")} onChange={async (users,action,staffCode)=>commit({...data,users,audit:[...data.audit,{sequence:data.audit.length+1,actorId:`demo-${role}`,deviceId:"tablet-A",assetId:staffCode,outcome:action,code:"DEMO_ONLY",beforeVersion:null,afterVersion:null}]})}/>}
 
       {page === "documents" && <><div className="demo-banner"><FileCheck2 size={17}/><span>ขั้นตอนหลักฐาน: ตรึงรุ่น → พิมพ์ → ลงหมึก → สแกน → ตรวจเทียบ → รับรองสำเนา · หน้านี้แสดงตัวอย่าง ยังไม่รับอัปโหลดหลักฐานจริง</span></div>{data.documents.map(d => <Card className="section-gap" key={d.id}><CardHeader><div><CardTitle>{d.title}</CardTitle><p className="panel-subtitle">{d.ref} · รุ่น {d.revision} · {d.poNo}</p></div><span className={`badge ${d.status === "SIGNED_COPY_VERIFIED" ? "success" : "warning"}`}>{d.status === "SIGNED_COPY_VERIFIED" ? "ตัวอย่างสำเนาตรวจแล้ว" : "รอลายเซ็นหมึก"}</span></CardHeader><CardContent><div className="detail-grid"><div><div className="detail-label">ตำแหน่งต้นฉบับกระดาษ</div><div className="detail-value">{d.location}</div></div><div><div className="detail-label">ความครบถ้วนของหลักฐาน</div><div className="detail-value">ต้องเก็บ PDF ต้นฉบับ / hash / สำเนาลงนามแยกกัน</div></div></div><p className="muted">ยังไม่มีไฟล์จริงในต้นแบบ · การเข้าสู่ระบบไม่เท่ากับการลงนามรับรองเอกสาร</p></CardContent></Card>)}</>}
 

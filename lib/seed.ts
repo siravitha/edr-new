@@ -1,3 +1,4 @@
+import type { DemoUser } from "./users.mjs";
 export const HOSPITAL = "UTH";
 export const wards = [
   { id: "ICU", name: "หอผู้ป่วยวิกฤต" },
@@ -13,7 +14,8 @@ export const roles = [
   { id: "executive", name: "ผู้บริหาร" }, { id: "warehouse", name: "เจ้าหน้าที่คลัง" },
   { id: "nurse", name: "พยาบาล · ICU" }, { id: "strategy", name: "ยุทธศาสตร์" },
   { id: "procurement", name: "พัสดุ" }, { id: "finance", name: "การเงิน" },
-  { id: "accounting", name: "บัญชี" }, { id: "auditor", name: "ผู้ตรวจสอบ" }
+  { id: "accounting", name: "บัญชี" }, { id: "auditor", name: "ผู้ตรวจสอบ" },
+  { id: "admin", name: "ผู้ดูแลระบบ · จำลอง" }
 ];
 export type Asset = {
   id: string; hospitalId: string; assetNo: string; name: string; serialNo: string;
@@ -23,6 +25,7 @@ export type Asset = {
 export type DemoState = {
   assets: Asset[]; receipts: any[]; conflicts: any[]; audit: any[];
   queue: any[]; payments: any[]; documents: any[]; lastSynced: string | null;
+  users?: DemoUser[];
 };
 export function createSeed(): DemoState {
   const assets: Asset[] = Array.from({ length: 40 }, (_, i) => {
