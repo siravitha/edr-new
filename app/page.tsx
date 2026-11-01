@@ -14,7 +14,7 @@ import { loadState, saveState } from "@/lib/storage";
 import { transitionAsset, transitionPayment } from "@/lib/domain.mjs";
 import { parseAssetCsv, toCsv } from "@/lib/csv.mjs";
 
-type Page = "dashboard" | "assets" | "procurement" | "finance" | "documents" | "sync" | "audit" | "integrations" | "users" | "document-codes" | "departments" | "hospital" | "vendors" | "reports" | "reports-strategy" | "reports-procurement" | "reports-finance" | "reports-accounting" | "reports-legal";
+type Page = "dashboard" | "assets" | "procurement" | "finance" | "documents" | "sync" | "audit" | "integrations" | "users" | "document-codes" | "departments" | "hospital" | "vendors" | "reports" | "reports-strategy" | "reports-procurement" | "reports-finance" | "reports-accounting" | "reports-legal" | "work-strategy" | "work-procurement" | "work-finance" | "work-accounting" | "work-legal";
 const nav = [
   { id: "dashboard", label: "ภาพรวมผู้บริหาร", icon: ChartNoAxesCombined },
   { id: "assets", label: "ทะเบียนครุภัณฑ์", icon: Box },
@@ -38,6 +38,13 @@ const reportSections = [
   { id: "reports-finance", label: "ฝ่ายการเงิน" },
   { id: "reports-accounting", label: "ฝ่ายบัญชี" },
   { id: "reports-legal", label: "ฝ่ายนิติกร" }
+] as const;
+const workspaceSections = [
+  { id: "work-strategy", label: "ฝ่ายแผนงานและยุทธศาสตร์", icon: ChartNoAxesCombined },
+  { id: "work-procurement", label: "ฝ่ายพัสดุกลาง", icon: Package },
+  { id: "work-finance", label: "ฝ่ายการเงิน", icon: Wallet },
+  { id: "work-accounting", label: "ฝ่ายบัญชี", icon: ClipboardList },
+  { id: "work-legal", label: "ฝ่ายนิติกร", icon: ShieldCheck }
 ] as const;
 const money = (v: number) => new Intl.NumberFormat("th-TH", { maximumFractionDigits: 0 }).format(v);
 const wardName = (id: string) => wards.find(w => w.id === id)?.name ?? id;
@@ -106,7 +113,8 @@ export default function Home() {
   const importGeneration = useRef(0);
   const importedSource = useRef("");
   const selectedReportSection = reportSections.find(n => n.id === page);
-  const title = selectedReportSection ? `รายงาน · ${selectedReportSection.label}` : nav.find(n => n.id === page)?.label;
+  const selectedWorkspaceSection = workspaceSections.find(n => n.id === page);
+  const title = selectedWorkspaceSection?.label ?? (selectedReportSection ? `รายงาน · ${selectedReportSection.label}` : nav.find(n => n.id === page)?.label);
   const masterData = data.masterData ?? masterSeed;
   const isOffline = offline || !networkOnline;
   const editable = ready && lockReady && !busy && !storageError && !duplicateTab;
@@ -244,7 +252,7 @@ export default function Home() {
     {menu && <button className="sidebar-overlay" onClick={() => setMenu(false)} aria-label="ปิดเมนู"/>}
     <aside className={`sidebar ${menu ? "open" : ""}`}><div className="brand"><div className="brand-icon"><Layers3 size={25}/></div><div className="brand-copy"><strong>UTH Smart Assets</strong><small>โรงพยาบาลอุดรธานี</small></div></div>
       <div className="workspace-label"><Building2 size={15}/><span>ศูนย์บริหารครุภัณฑ์</span><ChevronDown size={13}/></div>
-      <div className="nav-section">พื้นที่การทำงาน</div><nav aria-label="เมนูหลัก">{nav.slice(0, 5).map(n => <button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} aria-current={page === n.id ? "page" : undefined} onClick={() => go(n.id)}><n.icon size={18}/><span>{n.label}</span>{n.id === "finance" && pendingPayments > 0 && <span className="nav-count">{pendingPayments}</span>}</button>)}</nav>
+      <div className="nav-section">พื้นที่การทำงาน</div><nav aria-label="เมนูหลัก">{nav.slice(0, 5).map(n => <button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} aria-current={page === n.id ? "page" : undefined} onClick={() => go(n.id)}><n.icon size={18}/><span>{n.label}</span>{n.id === "finance" && pendingPayments > 0 && <span className="nav-count">{pendingPayments}</span>}</button>)}{workspaceSections.map(section=><button key={section.id} className={`nav-item ${page===section.id ? "active" : ""}`} aria-current={page===section.id ? "page" : undefined} onClick={()=>go(section.id)}><section.icon size={18}/><span>{section.label}</span></button>)}</nav>
       <div className="nav-section">การควบคุมและตรวจสอบ</div><nav aria-label="เมนูตรวจสอบ">{nav.slice(5).filter(n => n.id !== "reports" && !settingsPages.includes(n.id)).map(n => <button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => go(n.id)}><n.icon size={18}/><span>{n.label}</span>{n.id === "sync" && (data.queue.length + data.conflicts.length > 0) && <span className="nav-count">{data.queue.length + data.conflicts.length}</span>}</button>)}</nav>
       <nav aria-label="รายงาน" className="settings-nav"><button className={`nav-item nav-parent ${page === "reports" || selectedReportSection ? "nav-parent-current" : ""}`} aria-expanded={reportsOpen} aria-controls="reports-submenu" onClick={()=>setReportsOpen(open=>!open)}><FileText size={18}/><span>รายงาน</span><ChevronDown size={14} className={`nav-chevron ${reportsOpen ? "expanded" : ""}`}/></button>{reportsOpen && <div id="reports-submenu" className="nav-submenu">{reportSections.map(section=><button key={section.id} className={`nav-item nav-child ${page===section.id ? "active" : ""}`} aria-current={page===section.id ? "page" : undefined} onClick={()=>go(section.id)}><span>{section.label}</span></button>)}</div>}</nav>
       <nav aria-label="ตั้งค่าระบบ" className="settings-nav"><button className={`nav-item nav-parent ${settingsPages.includes(page) ? "nav-parent-current" : ""}`} aria-expanded={settingsOpen} aria-controls="settings-submenu" onClick={() => setSettingsOpen(open => !open)}><Settings2 size={18}/><span>ตั้งค่าระบบ</span><ChevronDown size={14} className={`nav-chevron ${settingsOpen ? "expanded" : ""}`}/></button>{settingsOpen && <div id="settings-submenu" className="nav-submenu">{nav.filter(n=>settingsPages.includes(n.id)).map(n=><button key={n.id} className={`nav-item nav-child ${page === n.id ? "active" : ""}`} aria-current={page === n.id ? "page" : undefined} onClick={() => go(n.id)}><n.icon size={16}/><span>{n.label}</span></button>)}</div>}</nav>
@@ -278,6 +286,8 @@ export default function Home() {
       {page === "procurement" && <LifecycleWorkspace/>}
 
       {selectedReportSection && <Card><CardHeader><CardTitle>{selectedReportSection.label}</CardTitle></CardHeader><CardContent><div className="empty-state"><FileText size={30}/><p>ยังไม่ได้เพิ่มรายงานในหมวดนี้</p><small>เตรียมหมวดรายงานตามฝ่ายไว้แล้ว</small></div></CardContent></Card>}
+
+      {selectedWorkspaceSection && <Card><CardHeader><CardTitle>พื้นที่การทำงาน · {selectedWorkspaceSection.label}</CardTitle></CardHeader><CardContent><div className="empty-state"><selectedWorkspaceSection.icon size={30}/><p>ยังไม่ได้เพิ่มงานในหมวดนี้</p><small>เตรียมหัวข้อหลักของฝ่ายไว้แล้ว</small></div></CardContent></Card>}
 
       {page === "reports" && <><div className="split-grid"><Card><CardHeader><CardTitle>รายงานทะเบียนครุภัณฑ์</CardTitle></CardHeader><CardContent><p className="muted">ส่งออกข้อมูลจำลองตามขอบเขตหน่วยงานที่ได้รับสิทธิ์ เป็นไฟล์ CSV</p><div className="heading-actions"><Button onClick={exportAssets}><ArrowDownToLine size={15}/>ส่งออกทะเบียน</Button><Button variant="secondary" onClick={()=>go("assets")}>ดูและกรองรายการ</Button></div></CardContent></Card><Card><CardHeader><CardTitle>รายงานประวัติการดำเนินการ</CardTitle></CardHeader><CardContent><p className="muted">ตรวจสอบประวัติคำสั่งและรายการขัดแย้ง พร้อมส่งออกจากหน้าประวัติ</p><Button variant="secondary" onClick={()=>go("audit")}><History size={15}/>เปิดประวัติและส่งออก</Button></CardContent></Card></div><div className="demo-banner section-gap-top"><FileText size={16}/><span>รายงานในรุ่นนี้เป็นข้อมูลจำลองและไฟล์ CSV ส่วนหัวรายงานพร้อมรูปตั้งค่าได้ที่ “ตั้งค่าระบบ → ข้อมูลโรงพยาบาล” สำหรับพัฒนารายงานฉบับพิมพ์ต่อไป</span></div></>}
 
