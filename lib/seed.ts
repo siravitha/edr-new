@@ -1,4 +1,5 @@
 import type { DemoUser } from "./users.mjs";
+import type { MasterState, HospitalProfile } from "./master-data.mjs";
 export const HOSPITAL = "UTH";
 export const wards = [
   { id: "ICU", name: "หอผู้ป่วยวิกฤต" },
@@ -26,6 +27,8 @@ export type DemoState = {
   assets: Asset[]; receipts: any[]; conflicts: any[]; audit: any[];
   queue: any[]; payments: any[]; documents: any[]; lastSynced: string | null;
   users?: DemoUser[];
+  masterData?: MasterState;
+  hospitalProfile?: HospitalProfile;
 };
 export function createSeed(): DemoState {
   const assets: Asset[] = Array.from({ length: 40 }, (_, i) => {

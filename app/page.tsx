@@ -5,6 +5,8 @@ import { Activity, ArrowDownToLine, ArrowRight, ArrowUpRight, Bell, Box, Buildin
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { LifecycleWorkspace } from "@/components/lifecycle-workspace";
 import { UserManagement } from "@/components/user-management";
+import { MasterDataManagement, HospitalProfileManagement } from "@/components/master-data-management";
+import { createMasterData } from "@/lib/master-data.mjs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { categories, createSeed, HOSPITAL, paymentLabels, roles, statusLabels, wards, type Asset, type DemoState } from "@/lib/seed";
@@ -12,7 +14,7 @@ import { loadState, saveState } from "@/lib/storage";
 import { transitionAsset, transitionPayment } from "@/lib/domain.mjs";
 import { parseAssetCsv, toCsv } from "@/lib/csv.mjs";
 
-type Page = "dashboard" | "assets" | "procurement" | "finance" | "documents" | "sync" | "audit" | "integrations" | "users";
+type Page = "dashboard" | "assets" | "procurement" | "finance" | "documents" | "sync" | "audit" | "integrations" | "users" | "document-codes" | "departments" | "hospital" | "vendors";
 const nav = [
   { id: "dashboard", label: "ภาพรวมผู้บริหาร", icon: ChartNoAxesCombined },
   { id: "assets", label: "ทะเบียนครุภัณฑ์", icon: Box },
@@ -22,8 +24,13 @@ const nav = [
   { id: "sync", label: "คิวซิงก์และข้อขัดแย้ง", icon: RefreshCw },
   { id: "audit", label: "ประวัติการดำเนินการ", icon: History },
   { id: "integrations", label: "การเชื่อมต่อระบบ", icon: Settings2 },
-  { id: "users", label: "จัดการผู้ใช้งาน", icon: ShieldCheck }
+  { id: "users", label: "จัดการผู้ใช้งาน", icon: ShieldCheck },
+  { id: "document-codes", label: "จัดการรหัสคุมเอกสาร", icon: FileText },
+  { id: "departments", label: "จัดการแผนก/ฝ่าย", icon: Building2 },
+  { id: "hospital", label: "ข้อมูลโรงพยาบาล", icon: HeartPulse },
+  { id: "vendors", label: "จัดการผู้ค้ากับโรงพยาบาล", icon: Package }
 ] as const;
+const settingsPages: readonly string[] = ["users", "document-codes", "departments", "hospital", "vendors"];
 const money = (v: number) => new Intl.NumberFormat("th-TH", { maximumFractionDigits: 0 }).format(v);
 const wardName = (id: string) => wards.find(w => w.id === id)?.name ?? id;
 const tone = (status: string) => status === "AVAILABLE" || status === "APPROVED" || status === "PAID" ? "success" : status === "IN_USE" ? "info" : status === "REPAIR" || status === "RETURNED" ? "danger" : "warning";
@@ -57,6 +64,7 @@ function Modal({ title, children, footer, close }: { title: string; children: Re
 
 export default function Home() {
   const [data, setData] = useState<DemoState>(createSeed);
+  const [masterSeed] = useState(createMasterData);
   const stateRef = useRef(data);
   const [ready, setReady] = useState(false);
   const [page, setPage] = useState<Page>("dashboard");
@@ -89,6 +97,7 @@ export default function Home() {
   const importGeneration = useRef(0);
   const importedSource = useRef("");
   const title = nav.find(n => n.id === page)?.label;
+  const masterData = data.masterData ?? masterSeed;
   const isOffline = offline || !networkOnline;
   const editable = ready && lockReady && !busy && !storageError && !duplicateTab;
   const scope = role === "nurse" ? ["ICU"] : wards.map(w => w.id);
@@ -226,8 +235,8 @@ export default function Home() {
     <aside className={`sidebar ${menu ? "open" : ""}`}><div className="brand"><div className="brand-icon"><Layers3 size={25}/></div><div className="brand-copy"><strong>UTH Smart Assets</strong><small>โรงพยาบาลอุดรธานี</small></div></div>
       <div className="workspace-label"><Building2 size={15}/><span>ศูนย์บริหารครุภัณฑ์</span><ChevronDown size={13}/></div>
       <div className="nav-section">พื้นที่การทำงาน</div><nav aria-label="เมนูหลัก">{nav.slice(0, 5).map(n => <button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} aria-current={page === n.id ? "page" : undefined} onClick={() => go(n.id)}><n.icon size={18}/><span>{n.label}</span>{n.id === "finance" && pendingPayments > 0 && <span className="nav-count">{pendingPayments}</span>}</button>)}</nav>
-      <div className="nav-section">การควบคุมและตรวจสอบ</div><nav aria-label="เมนูตรวจสอบ">{nav.slice(5).filter(n => n.id !== "users").map(n => <button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => go(n.id)}><n.icon size={18}/><span>{n.label}</span>{n.id === "sync" && (data.queue.length + data.conflicts.length > 0) && <span className="nav-count">{data.queue.length + data.conflicts.length}</span>}</button>)}</nav>
-      <nav aria-label="ตั้งค่าระบบ" className="settings-nav"><button className={`nav-item nav-parent ${page === "users" ? "nav-parent-current" : ""}`} aria-expanded={settingsOpen} aria-controls="settings-submenu" onClick={() => setSettingsOpen(open => !open)}><Settings2 size={18}/><span>ตั้งค่าระบบ</span><ChevronDown size={14} className={`nav-chevron ${settingsOpen ? "expanded" : ""}`}/></button>{settingsOpen && <div id="settings-submenu" className="nav-submenu"><button className={`nav-item nav-child ${page === "users" ? "active" : ""}`} aria-current={page === "users" ? "page" : undefined} onClick={() => go("users")}><ShieldCheck size={16}/><span>จัดการผู้ใช้งาน</span></button></div>}</nav>
+      <div className="nav-section">การควบคุมและตรวจสอบ</div><nav aria-label="เมนูตรวจสอบ">{nav.slice(5).filter(n => !settingsPages.includes(n.id)).map(n => <button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => go(n.id)}><n.icon size={18}/><span>{n.label}</span>{n.id === "sync" && (data.queue.length + data.conflicts.length > 0) && <span className="nav-count">{data.queue.length + data.conflicts.length}</span>}</button>)}</nav>
+      <nav aria-label="ตั้งค่าระบบ" className="settings-nav"><button className={`nav-item nav-parent ${settingsPages.includes(page) ? "nav-parent-current" : ""}`} aria-expanded={settingsOpen} aria-controls="settings-submenu" onClick={() => setSettingsOpen(open => !open)}><Settings2 size={18}/><span>ตั้งค่าระบบ</span><ChevronDown size={14} className={`nav-chevron ${settingsOpen ? "expanded" : ""}`}/></button>{settingsOpen && <div id="settings-submenu" className="nav-submenu">{nav.filter(n=>settingsPages.includes(n.id)).map(n=><button key={n.id} className={`nav-item nav-child ${page === n.id ? "active" : ""}`} aria-current={page === n.id ? "page" : undefined} onClick={() => go(n.id)}><n.icon size={16}/><span>{n.label}</span></button>)}</div>}</nav>
       <div className="sidebar-footer"><div className="sidebar-security"><ShieldCheck size={16}/><span>ต้นแบบ · ข้อมูลจำลองเท่านั้น</span></div><div className="footer-company">พัฒนาโดย <strong>Pacific Plus IT</strong><br/><span>SMARTER ASSETS. BETTER CARE.</span></div></div>
     </aside>
     <div className="main-panel"><header className="topbar"><div className="breadcrumb"><button className="mobile-menu" aria-label="เปิดเมนู" onClick={() => setMenu(true)}><Menu size={21}/></button><span>ระบบบริหารครุภัณฑ์</span><ChevronRight size={13}/><strong>{title}</strong></div><div className="topbar-actions"><span className={`connection-indicator ${isOffline ? "is-offline" : ""}`}>{isOffline ? <WifiOff size={14}/> : <Wifi size={14}/>} {isOffline ? "ออฟไลน์" : "พร้อมทดลอง"}</span><button className="help-btn" aria-label="วิธีทดลอง" onClick={() => setModal("help")}><CircleHelp size={19}/></button><div className="topbar-divider"/><div className="avatar">พพ</div><label className="role-picker"><small>มุมมองจำลอง</small><select aria-label="เลือกบทบาทจำลอง" value={role} onChange={e => setRole(e.target.value)}>{roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label></div></header>
@@ -257,7 +266,11 @@ export default function Home() {
 
       {page === "procurement" && <LifecycleWorkspace/>}
 
-      {page === "users" && <UserManagement users={data.users} actorRole={role} editable={editable} switchToAdmin={()=>setRole("admin")} onChange={async (users,action,staffCode)=>commit({...data,users,audit:[...data.audit,{sequence:data.audit.length+1,actorId:`demo-${role}`,deviceId:"tablet-A",assetId:staffCode,outcome:action,code:"DEMO_ONLY",beforeVersion:null,afterVersion:null}]})}/>}
+      {page === "users" && <UserManagement users={data.users} departmentOptions={masterData.departments.map(d=>({id:d.id,name:d.name,status:d.status}))} actorRole={role} editable={editable} switchToAdmin={()=>setRole("admin")} onChange={async (users,action,staffCode)=>commit({...data,users,audit:[...data.audit,{sequence:data.audit.length+1,actorId:`demo-${role}`,deviceId:"tablet-A",assetId:staffCode,outcome:action,code:"DEMO_ONLY",beforeVersion:null,afterVersion:null}]})}/>}
+
+      {(["document-codes","departments","vendors"] as string[]).includes(page) && <MasterDataManagement kind={page === "document-codes" ? "documents" : page === "departments" ? "departments" : "vendors"} state={masterData} actorRole={role} editable={editable} switchToAdmin={()=>setRole("admin")} onChange={async (masterData,event,code)=>commit({...data,masterData,audit:[...data.audit,{sequence:data.audit.length+1,actorId:`demo-${role}`,deviceId:"tablet-A",assetId:code,outcome:event,code:"DEMO_ONLY",beforeVersion:null,afterVersion:null}]})}/>}
+
+      {page === "hospital" && <HospitalProfileManagement profile={data.hospitalProfile} actorRole={role} editable={editable} switchToAdmin={()=>setRole("admin")} onChange={async hospitalProfile=>commit({...data,hospitalProfile,audit:[...data.audit,{sequence:data.audit.length+1,actorId:`demo-${role}`,deviceId:"tablet-A",assetId:"HOSPITAL_PROFILE",outcome:"HOSPITAL_PROFILE_UPDATED",code:"DEMO_ONLY",beforeVersion:null,afterVersion:null}]})}/>}
 
       {page === "documents" && <><div className="demo-banner"><FileCheck2 size={17}/><span>ขั้นตอนหลักฐาน: ตรึงรุ่น → พิมพ์ → ลงหมึก → สแกน → ตรวจเทียบ → รับรองสำเนา · หน้านี้แสดงตัวอย่าง ยังไม่รับอัปโหลดหลักฐานจริง</span></div>{data.documents.map(d => <Card className="section-gap" key={d.id}><CardHeader><div><CardTitle>{d.title}</CardTitle><p className="panel-subtitle">{d.ref} · รุ่น {d.revision} · {d.poNo}</p></div><span className={`badge ${d.status === "SIGNED_COPY_VERIFIED" ? "success" : "warning"}`}>{d.status === "SIGNED_COPY_VERIFIED" ? "ตัวอย่างสำเนาตรวจแล้ว" : "รอลายเซ็นหมึก"}</span></CardHeader><CardContent><div className="detail-grid"><div><div className="detail-label">ตำแหน่งต้นฉบับกระดาษ</div><div className="detail-value">{d.location}</div></div><div><div className="detail-label">ความครบถ้วนของหลักฐาน</div><div className="detail-value">ต้องเก็บ PDF ต้นฉบับ / hash / สำเนาลงนามแยกกัน</div></div></div><p className="muted">ยังไม่มีไฟล์จริงในต้นแบบ · การเข้าสู่ระบบไม่เท่ากับการลงนามรับรองเอกสาร</p></CardContent></Card>)}</>}
 
