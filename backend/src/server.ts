@@ -6,6 +6,8 @@ import { z } from "zod";
 
 const app = Fastify({ logger: { redact: ["req.headers.authorization"] }, bodyLimit: 4096, trustProxy: false });
 const db = new PrismaClient();
+// ระงับคำสั่งจริงจนกว่าจะมีนโยบายอนุมัติและ trusted policy integration ไม่มีทางข้ามผ่าน env
+const offlinePolicyStatus: string = 'UNSPECIFIED';
 const issuer = process.env.JWT_ISSUER;
 const audience = process.env.JWT_AUDIENCE;
 const pem = process.env.JWT_PUBLIC_KEY_PEM?.replace(/\\n/g, "\n");
@@ -62,6 +64,7 @@ app.post("/api/sync", async (req, reply) => {
   if (!claims.roles.includes("WAREHOUSE") && !["IN_USE", "REPAIR"].includes(cmd.status)) {
     throw new HttpError(403, "Ward role may only request IN_USE or REPAIR");
   }
+  if (offlinePolicyStatus !== 'APPROVED') throw new HttpError(503, 'OFFLINE_POLICY_UNAPPROVED');
   // สร้างลำดับฟิลด์แน่นอน และไม่ใช้เวลาเครื่องตัดสินข้อขัดแย้ง
   const requestHash = createHash("sha256").update(JSON.stringify([
     cmd.mutationId, cmd.assetId, cmd.baseVersion, cmd.status, cmd.reason,

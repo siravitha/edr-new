@@ -70,6 +70,16 @@ test('API ตรวจตัวตน สิทธิ์ และขนาด�
     await t.test('JWT ถูกลงนามแต่ audience ผิดต้องปฏิเสธ 401', () => post('{}', token({ aud: 'another-app' }), 401));
     await t.test('AUDITOR อ่านอย่างเดียวส่ง sync ไม่ได้ 403', () => post('{}', token({ roles: ['AUDITOR'] }), 403));
     await t.test('WAREHOUSE ผ่าน auth แต่คำสั่งไม่ครบต้องปฏิเสธ 400', () => post('{}', token(), 400));
+    await t.test('คำสั่งครบยังระงับ 503 เมื่อนโยบายไม่อนุมัติ โดยไม่เข้าฐานข้อมูล', async () => {
+      const response = await fetch(`${base}/api/sync`, {
+        method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token()}` },
+        body: JSON.stringify({ mutationId: '44444444-4444-4444-8444-444444444444',
+          assetId: '55555555-5555-4555-8555-555555555555', baseVersion: 0, status: 'IN_USE', reason: 'Test observation' }),
+        signal: AbortSignal.timeout(2000)
+      });
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), { error: 'OFFLINE_POLICY_UNAPPROVED' });
+    });
     await t.test('JSON เสียต้องปฏิเสธ 400', () => post('{', token(), 400));
     await t.test('body ใหญ่เกินขีดจำกัดต้องปฏิเสธ 413', () => post(JSON.stringify({ data: 'x'.repeat(5000) }), token(), 413));
   } finally {

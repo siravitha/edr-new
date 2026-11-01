@@ -1,0 +1,539 @@
+// แบบจำลองระยะที่ 2 แยกจากฐานเดิม ยังไม่ได้นำไปใช้กับฐานโรงพยาบาล
+generator client {
+  provider = "prisma-client-js"
+  output   = "../backend/generated/phase2-client"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum FundType {
+  ANNUAL_BUDGET
+  HOSPITAL_REVENUE
+  DONATION
+}
+
+enum WorkType {
+  PURCHASE
+  HIRE
+  SERVICE
+  MAINTENANCE
+  LEASE
+  CONSTRUCTION
+  DONATION_IN_KIND
+}
+
+enum ProcurementMethod {
+  SPECIFIC
+  E_MARKET
+  E_BIDDING
+  SELECTION
+  OTHER_LEGAL
+  NOT_APPLICABLE
+}
+
+enum ResourceType {
+  OWNED_ASSET
+  SUPPLY
+  SERVICE_DELIVERABLE
+  CONSTRUCTION_IN_PROGRESS
+  LEASED_EQUIPMENT
+}
+
+enum BudgetMovementType {
+  COMMIT
+  PAY
+  RELEASE
+  ADJUST
+}
+
+enum SignatureState {
+  DRAFT
+  FROZEN
+  AWAITING_INK
+  SCAN_RECEIVED
+  VERIFIED
+  SUPERSEDED
+}
+
+model Fund {
+  id          String   @id @default(uuid()) @db.Char(36)
+  hospitalId  String   @db.Char(36)
+  code        String   @db.VarChar(64)
+  type        FundType
+  purpose     String?  @db.Text
+  legalBasis  String   @db.VarChar(255)
+  budgets     BudgetEnvelope[]
+  donations   DonationReceipt[]
+  @@unique([hospitalId, id])
+  @@unique([hospitalId, code])
+}
+
+model AnnualPlan {
+  id          String   @id @default(uuid()) @db.Char(36)
+  hospitalId  String   @db.Char(36)
+  fiscalYear  Int
+  title       String   @db.VarChar(255)
+  status      String   @default("DRAFT") @db.VarChar(32)
+  version     Int      @default(0)
+  requests    DemandRequest[]
+  budgets     BudgetEnvelope[]
+  cases       ProcurementCase[]
+  @@unique([hospitalId, id])
+}
+
+model DemandRequest {
+  id          String     @id @default(uuid()) @db.Char(36)
+  hospitalId  String     @db.Char(36)
+  planId      String?    @db.Char(36)
+  departmentId String    @db.Char(36)
+  requestedBy String     @db.VarChar(191)
+  workType    WorkType
+  rationale   String     @db.Text
+  status      String     @default("DRAFT") @db.VarChar(32)
+  version     Int        @default(0)
+  plan        AnnualPlan? @relation(fields: [hospitalId, planId], references: [hospitalId, id], onDelete: Restrict)
+  cases       ProcurementCase[]
+  @@unique([hospitalId, id])
+}
+
+model BudgetEnvelope {
+  id                String   @id @default(uuid()) @db.Char(36)
+  hospitalId        String   @db.Char(36)
+  planId            String   @db.Char(36)
+  fundId            String   @db.Char(36)
+  fiscalYear        Int
+  departmentId      String   @db.Char(36)
+  allocatedSatang   BigInt
+  committedSatang   BigInt   @default(0)
+  paidSatang        BigInt   @default(0)
+  version           Int      @default(0)
+  plan              AnnualPlan @relation(fields: [hospitalId, planId], references: [hospitalId, id], onDelete: Restrict)
+  fund              Fund @relation(fields: [hospitalId, fundId], references: [hospitalId, id], onDelete: Restrict)
+  commitments       Commitment[]
+  movements         BudgetMovement[]
+  @@unique([hospitalId, id])
+  @@index([hospitalId, fiscalYear, fundId, departmentId])
+}
+
+model ProcurementCase {
+  id            String   @id @default(uuid()) @db.Char(36)
+  hospitalId    String   @db.Char(36)
+  planId        String   @db.Char(36)
+  demandId      String   @db.Char(36)
+  prNo          String   @db.VarChar(80)
+  workType      WorkType
+  method        ProcurementMethod
+  legalBasis    String   @db.VarChar(255)
+  procedureVersion String @db.VarChar(80)
+  referencePriceSatang BigInt?
+  torDocumentRef String? @db.Char(36)
+  egpReference  String?  @db.VarChar(100)
+  status        String   @default("PR_DRAFT") @db.VarChar(40)
+  version       Int      @default(0)
+  plan          AnnualPlan @relation(fields: [hospitalId, planId], references: [hospitalId, id], onDelete: Restrict)
+  demand        DemandRequest @relation(fields: [hospitalId, demandId], references: [hospitalId, id], onDelete: Restrict)
+  contracts     Contract[]
+  mandates      CommitteeMandate[]
+  @@unique([hospitalId, id])
+  @@unique([hospitalId, prNo])
+}
+
+model Contract {
+  id              String    @id @default(uuid()) @db.Char(36)
+  hospitalId      String    @db.Char(36)
+  caseId          String    @db.Char(36)
+  number          String    @db.VarChar(80)
+  amountSatang    BigInt
+  signedAt        DateTime? @db.DateTime(3)
+  signatureDocRef String?   @db.Char(36)
+  status          String    @default("DRAFT") @db.VarChar(32)
+  version         Int       @default(0)
+  case            ProcurementCase @relation(fields: [hospitalId, caseId], references: [hospitalId, id], onDelete: Restrict)
+  commitments     Commitment[]
+  deliveries      Delivery[]
+  claims          PaymentClaim[]
+  resources       ManagedResource[]
+  @@unique([hospitalId, id])
+  @@unique([hospitalId, number])
+}
+
+model Commitment {
+  id              String   @id @default(uuid()) @db.Char(36)
+  hospitalId      String   @db.Char(36)
+  contractId      String   @db.Char(36)
+  budgetId        String   @db.Char(36)
+  amountSatang    BigInt
+  paidSatang      BigInt   @default(0)
+  releasedSatang  BigInt   @default(0)
+  contract        Contract @relation(fields: [hospitalId, contractId], references: [hospitalId, id], onDelete: Restrict)
+  budget          BudgetEnvelope @relation(fields: [hospitalId, budgetId], references: [hospitalId, id], onDelete: Restrict)
+  movements       BudgetMovement[]
+  @@unique([hospitalId, id])
+  @@unique([hospitalId, contractId, budgetId])
+}
+
+model BudgetMovement {
+  id             String  @id @default(uuid()) @db.Char(36)
+  hospitalId     String  @db.Char(36)
+  budgetId       String  @db.Char(36)
+  commitmentId   String  @db.Char(36)
+  operationId    String  @db.Char(36)
+  type           BudgetMovementType
+  amountSatang   BigInt
+  sourceRef      String  @db.VarChar(100)
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+  budget         BudgetEnvelope @relation(fields: [hospitalId, budgetId], references: [hospitalId, id], onDelete: Restrict)
+  commitment     Commitment @relation(fields: [hospitalId, commitmentId], references: [hospitalId, id], onDelete: Restrict)
+  @@unique([hospitalId, operationId, commitmentId, type])
+}
+
+model Delivery {
+  id             String   @id @default(uuid()) @db.Char(36)
+  hospitalId     String   @db.Char(36)
+  contractId     String   @db.Char(36)
+  installmentNo  Int
+  acceptedSatang BigInt
+  acceptedAt     DateTime? @db.DateTime(3)
+  inspectionDocRef String? @db.Char(36)
+  status         String   @default("PENDING") @db.VarChar(32)
+  contract       Contract @relation(fields: [hospitalId, contractId], references: [hospitalId, id], onDelete: Restrict)
+  resources      ManagedResource[]
+  claimLinks     ClaimDelivery[]
+  @@unique([hospitalId, id])
+  @@unique([hospitalId, contractId, installmentNo])
+}
+
+model PaymentClaim {
+  id           String   @id @default(uuid()) @db.Char(36)
+  hospitalId   String   @db.Char(36)
+  contractId   String   @db.Char(36)
+  claimNo      String   @db.VarChar(80)
+  revision     Int
+  supersedesId String?  @db.Char(36)
+  amountSatang BigInt
+  makerId      String   @db.VarChar(191)
+  status       String   @default("DRAFT") @db.VarChar(32)
+  returnReason String?  @db.Text
+  contract     Contract @relation(fields: [hospitalId, contractId], references: [hospitalId, id], onDelete: Restrict)
+  deliveries   ClaimDelivery[]
+  payments     PaymentPosting[]
+  @@unique([hospitalId, id])
+  @@unique([hospitalId, claimNo, revision])
+}
+
+model ClaimDelivery {
+  hospitalId    String @db.Char(36)
+  claimId       String @db.Char(36)
+  deliveryId    String @db.Char(36)
+  amountSatang  BigInt
+  claim         PaymentClaim @relation(fields: [hospitalId, claimId], references: [hospitalId, id], onDelete: Restrict)
+  delivery      Delivery @relation(fields: [hospitalId, deliveryId], references: [hospitalId, id], onDelete: Restrict)
+  @@id([hospitalId, claimId, deliveryId])
+}
+
+model PaymentPosting {
+  id           String   @id @default(uuid()) @db.Char(36)
+  hospitalId   String   @db.Char(36)
+  claimId      String   @db.Char(36)
+  paymentRef   String   @db.VarChar(100)
+  operationId  String   @db.Char(36)
+  amountSatang BigInt
+  confirmedAt  DateTime @db.DateTime(3)
+  claim        PaymentClaim @relation(fields: [hospitalId, claimId], references: [hospitalId, id], onDelete: Restrict)
+  @@unique([hospitalId, paymentRef])
+  @@unique([hospitalId, operationId])
+}
+
+model DonationReceipt {
+  id           String   @id @default(uuid()) @db.Char(36)
+  hospitalId   String   @db.Char(36)
+  fundId       String   @db.Char(36)
+  receiptNo    String   @db.VarChar(80)
+  purpose      String   @db.Text
+  acceptanceDocRef String @db.Char(36)
+  valueSatang  BigInt
+  acceptedAt   DateTime @db.DateTime(3)
+  fund         Fund @relation(fields: [hospitalId, fundId], references: [hospitalId, id], onDelete: Restrict)
+  resources    ManagedResource[]
+  @@unique([hospitalId, id])
+  @@unique([hospitalId, receiptNo])
+}
+
+model ManagedResource {
+  id             String  @id @default(uuid()) @db.Char(36)
+  hospitalId     String  @db.Char(36)
+  resourceNo     String  @db.VarChar(80)
+  type           ResourceType
+  contractId     String? @db.Char(36)
+  deliveryId     String? @db.Char(36)
+  donationId     String? @db.Char(36)
+  policyId       String? @db.Char(36)
+  costSatang     BigInt
+  residualSatang BigInt
+  availableForUseAt DateTime? @db.Date
+  operationalStatus String @default("QUARANTINED") @db.VarChar(32)
+  custodianDepartmentId String @db.Char(36)
+  version        Int     @default(0)
+  contract       Contract? @relation(fields: [hospitalId, contractId], references: [hospitalId, id], onDelete: Restrict)
+  delivery       Delivery? @relation(fields: [hospitalId, deliveryId], references: [hospitalId, id], onDelete: Restrict)
+  donation       DonationReceipt? @relation(fields: [hospitalId, donationId], references: [hospitalId, id], onDelete: Restrict)
+  policy         DepreciationPolicy? @relation(fields: [hospitalId, policyId], references: [hospitalId, id], onDelete: Restrict)
+  custody        CustodyEvent[]
+  maintenance    MaintenanceOrder[]
+  depreciation   DepreciationPosting[]
+  inspections    InventoryObservation[]
+  disposals      DisposalCase[]
+  @@unique([hospitalId, id])
+  @@unique([hospitalId, resourceNo])
+}
+
+model CustodyEvent {
+  id           String @id @default(uuid()) @db.Char(36)
+  hospitalId   String @db.Char(36)
+  resourceId   String @db.Char(36)
+  fromDepartmentId String? @db.Char(36)
+  toDepartmentId   String @db.Char(36)
+  senderId     String @db.VarChar(191)
+  receiverId   String @db.VarChar(191)
+  signedDocRef String @db.Char(36)
+  occurredAt   DateTime @db.DateTime(3)
+  resource     ManagedResource @relation(fields: [hospitalId, resourceId], references: [hospitalId, id], onDelete: Restrict)
+}
+
+model MaintenanceOrder {
+  id           String @id @default(uuid()) @db.Char(36)
+  hospitalId   String @db.Char(36)
+  resourceId   String @db.Char(36)
+  reportedBy   String @db.VarChar(191)
+  diagnosis    String @db.Text
+  repairCaseRef String? @db.Char(36)
+  costSatang   BigInt @default(0)
+  status       String @default("REPORTED") @db.VarChar(32)
+  safetyReleaseDocRef String? @db.Char(36)
+  resource     ManagedResource @relation(fields: [hospitalId, resourceId], references: [hospitalId, id], onDelete: Restrict)
+}
+
+model DepreciationPolicy {
+  id             String @id @default(uuid()) @db.Char(36)
+  hospitalId     String @db.Char(36)
+  categoryCode   String @db.VarChar(64)
+  revision       Int
+  method         String @db.VarChar(32)
+  lifetimeMonths Int
+  prorationRule  String @db.VarChar(80)
+  roundingRule   String @db.VarChar(80)
+  legalRef       String @db.VarChar(255)
+  approvedBy     String? @db.VarChar(191)
+  approvedAt     DateTime? @db.DateTime(3)
+  effectiveFrom  DateTime @db.Date
+  resources      ManagedResource[]
+  @@unique([hospitalId, id])
+  @@unique([hospitalId, categoryCode, revision])
+}
+
+model DepreciationPosting {
+  id                  String @id @default(uuid()) @db.Char(36)
+  hospitalId          String @db.Char(36)
+  resourceId          String @db.Char(36)
+  period              String @db.Char(7)
+  adjustmentNo        Int @default(0)
+  policySnapshot      Json
+  expenseSatang       BigInt
+  accumulatedSatang   BigInt
+  journalRef          String @db.Char(36)
+  resource            ManagedResource @relation(fields: [hospitalId, resourceId], references: [hospitalId, id], onDelete: Restrict)
+  @@unique([hospitalId, resourceId, period, adjustmentNo])
+}
+
+model Journal {
+  id             String @id @default(uuid()) @db.Char(36)
+  hospitalId     String @db.Char(36)
+  number         String @db.VarChar(80)
+  period         String @db.Char(7)
+  sourceRef      String @db.VarChar(100)
+  reversalOfId   String? @db.Char(36)
+  postedAt       DateTime? @db.DateTime(3)
+  lines          JournalLine[]
+  @@unique([hospitalId, id])
+  @@unique([hospitalId, number])
+}
+
+model JournalLine {
+  id           String @id @default(uuid()) @db.Char(36)
+  hospitalId   String @db.Char(36)
+  journalId    String @db.Char(36)
+  accountCode  String @db.VarChar(32)
+  debitSatang  BigInt @default(0)
+  creditSatang BigInt @default(0)
+  journal      Journal @relation(fields: [hospitalId, journalId], references: [hospitalId, id], onDelete: Restrict)
+}
+
+model InventoryObservation {
+  id           String @id @default(uuid()) @db.Char(36)
+  hospitalId   String @db.Char(36)
+  resourceId   String @db.Char(36)
+  fiscalYear   Int
+  inspectorId  String @db.VarChar(191)
+  physicallyPresent Boolean
+  condition    String @db.VarChar(80)
+  evidenceDocRef String @db.Char(36)
+  observedAt   DateTime @db.DateTime(3)
+  resource     ManagedResource @relation(fields: [hospitalId, resourceId], references: [hospitalId, id], onDelete: Restrict)
+  @@index([hospitalId, fiscalYear, resourceId])
+}
+
+model DisposalCase {
+  id            String @id @default(uuid()) @db.Char(36)
+  hospitalId    String @db.Char(36)
+  resourceId    String @db.Char(36)
+  reason        String @db.Text
+  method        String @db.VarChar(40)
+  proposerId    String @db.VarChar(191)
+  approverId    String? @db.VarChar(191)
+  approvalDocRef String? @db.Char(36)
+  executionDocRef String? @db.Char(36)
+  executionAt   DateTime? @db.DateTime(3)
+  proceedsSatang BigInt? 
+  status        String @default("PROPOSED") @db.VarChar(32)
+  version       Int @default(0)
+  resource      ManagedResource @relation(fields: [hospitalId, resourceId], references: [hospitalId, id], onDelete: Restrict)
+  @@unique([hospitalId, id])
+}
+
+model DocumentRevision {
+  id             String @id @default(uuid()) @db.Char(36)
+  hospitalId     String @db.Char(36)
+  documentNo     String @db.VarChar(80)
+  revision       Int
+  state          SignatureState @default(DRAFT)
+  originalPdfHash Bytes? @db.Binary(32)
+  signedScanHash Bytes? @db.Binary(32)
+  objectRef      String @db.VarChar(255)
+  paperLocation  String? @db.VarChar(255)
+  verifiedBy     String? @db.VarChar(191)
+  verifiedAt     DateTime? @db.DateTime(3)
+  supersedesId   String? @db.Char(36)
+  @@unique([hospitalId, id])
+  @@unique([hospitalId, documentNo, revision])
+}
+
+model CommitteeMandate {
+  id           String @id @default(uuid()) @db.Char(36)
+  hospitalId   String @db.Char(36)
+  caseId       String @db.Char(36)
+  orderDocRef  String @db.Char(36)
+  committeeType String @db.VarChar(64)
+  subject      String @db.VarChar(191)
+  position     String @db.VarChar(32)
+  effectiveFrom DateTime @db.DateTime(3)
+  effectiveTo   DateTime? @db.DateTime(3)
+  case         ProcurementCase @relation(fields: [hospitalId, caseId], references: [hospitalId, id], onDelete: Restrict)
+  @@index([hospitalId, caseId, subject])
+}
+
+model ExternalMapping {
+  id             String @id @default(uuid()) @db.Char(36)
+  hospitalId     String @db.Char(36)
+  systemCode     String @db.VarChar(80)
+  entityType     String @db.VarChar(64)
+  externalId     String @db.VarChar(191)
+  internalId     String @db.Char(36)
+  sourceVersion  String? @db.VarChar(100)
+  lastReconciledAt DateTime? @db.DateTime(3)
+  @@unique([hospitalId, systemCode, entityType, externalId])
+}
+
+model AuditStream {
+  hospitalId String @db.Char(36)
+  streamId   String @db.VarChar(100)
+  sequence   BigInt @default(0)
+  headHash   Bytes @db.Binary(32)
+  @@id([hospitalId, streamId])
+}
+
+model AuditEvent {
+  id            String @id @default(uuid()) @db.Char(36)
+  hospitalId    String @db.Char(36)
+  streamId      String @db.VarChar(100)
+  sequence      BigInt
+  entityId      String @db.Char(36)
+  eventType     String @db.VarChar(80)
+  actorSubject  String @db.VarChar(191)
+  providerIdRef String? @db.VarChar(191)
+  ip            String @db.VarChar(45)
+  deviceId      String? @db.Char(36)
+  operationId   String @db.Char(36)
+  payload       Json
+  previousHash  Bytes @db.Binary(32)
+  eventHash     Bytes @db.Binary(32)
+  createdAt     DateTime @default(now()) @db.DateTime(3)
+  @@unique([hospitalId, streamId, sequence])
+}
+
+model OutboxEvent {
+  id          String @id @default(uuid()) @db.Char(36)
+  hospitalId  String @db.Char(36)
+  operationId String @db.Char(36)
+  eventType   String @db.VarChar(80)
+  payload     Json
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+  deliveredAt DateTime? @db.DateTime(3)
+  @@unique([hospitalId, operationId, eventType])
+}
+
+model CommandReceipt {
+  id            String @id @default(uuid()) @db.Char(36)
+  hospitalId    String @db.Char(36)
+  deviceId      String @db.Char(36)
+  operationId   String @db.Char(36)
+  actorSubject  String @db.VarChar(191)
+  requestHash   String @db.Char(64)
+  outcome       Json
+  createdAt     DateTime @default(now()) @db.DateTime(3)
+  @@unique([hospitalId, deviceId, operationId])
+}
+
+model SyncConflict {
+  id             String @id @default(uuid()) @db.Char(36)
+  hospitalId     String @db.Char(36)
+  resourceId     String @db.Char(36)
+  deviceId       String @db.Char(36)
+  operationId    String @db.Char(36)
+  baseVersion    Int
+  currentVersion Int
+  currentState   Json
+  proposedChange Json
+  resolutionCommandId String? @db.Char(36)
+  status         String @default("OPEN") @db.VarChar(24)
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+  @@unique([hospitalId, deviceId, operationId])
+  @@index([hospitalId, resourceId, status])
+}
+
+model RoleGrant {
+  id             String @id @default(uuid()) @db.Char(36)
+  hospitalId     String @db.Char(36)
+  subject        String @db.VarChar(191)
+  role           String @db.VarChar(64)
+  departmentId   String? @db.Char(36)
+  caseId         String? @db.Char(36)
+  orderDocRef    String @db.Char(36)
+  maxAmountSatang BigInt?
+  effectiveFrom  DateTime @db.DateTime(3)
+  effectiveTo    DateTime? @db.DateTime(3)
+  revokedAt      DateTime? @db.DateTime(3)
+  @@index([hospitalId, subject, role])
+}
+
+model DeviceEnrollment {
+  id             String @id @default(uuid()) @db.Char(36)
+  hospitalId     String @db.Char(36)
+  keyThumbprint  String @db.VarChar(191)
+  assignedSubject String @db.VarChar(191)
+  enrolledAt     DateTime @db.DateTime(3)
+  revokedAt      DateTime? @db.DateTime(3)
+  @@unique([hospitalId, keyThumbprint])
+}
