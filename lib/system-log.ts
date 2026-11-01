@@ -15,7 +15,7 @@ export function createSystemLog(context:LogContext,activity:Activity,now=new Dat
   return {eventId:crypto.randomUUID(),operationId:activity.operationId??crypto.randomUUID(),recordedAt:now,occurredAt,actorId:activity.actorId??context.actorId,role:activity.role??context.role,department:activity.department??context.department??null,sessionId:context.sessionId,deviceId:context.deviceId,page:context.page,module:activity.module??context.page,action:activity.action,target:activity.target??"",outcome:activity.outcome??"SUCCESS",reason:activity.reason??"",before:redactLog(activity.before),after:redactLog(activity.after),legacy,ip:null,providerId:null};
 }
 type State = Record<string,any>;
-const paths = ["assets","payments","documents","users","queue","conflicts","receipts","planning.rounds","planning.demands","planning.plans","masterData.documents","masterData.departments","masterData.vendors"];
+const paths = ["assetNumbering.intakes","assets","payments","documents","users","queue","conflicts","receipts","planning.rounds","planning.demands","planning.plans","masterData.documents","masterData.departments","masterData.vendors"];
 const get=(state:State,path:string):any=>path.split(".").reduce((value,key)=>value?.[key],state);
 const id=(row:any,index:number)=>String(row?.id??row?.code??row?.command?.opId??row?.command?.id??row?.assetId??index);
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);

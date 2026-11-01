@@ -72,3 +72,5 @@ test('นโยบายอนุมัติยังไม่ให้ offline
   const input = envelope(); input.command.action = 'REPORT_DAMAGE_DRAFT';
   assert.equal(authorizeOfflineCommand(input).code, 'OFFLINE_ACTION_NOT_APPROVED');
 });
+
+test('barcode รองรับเลขทางการ 4 และ 5 หลักโดยไม่รับศูนย์ทั้งชุด',()=>{for(const code of ['7110-010-0001/69','7110-010-00001/70'])assert.equal(barcodeSchema.safeParse(code).success,true);for(const code of ['7110-010-00000/70','7110-010-0000/69','7110-010-00001/70 OR 1=1'])assert.equal(barcodeSchema.safeParse(code).success,false);});

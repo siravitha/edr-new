@@ -1,3 +1,4 @@
+import type { NumberingState } from "./asset-numbering";
 import type { PlanningState } from "./planning";
 import type { DemoUser } from "./users.mjs";
 import type { MasterState, HospitalProfile } from "./master-data.mjs";
@@ -20,12 +21,14 @@ export const roles = [
   { id: "admin", name: "ผู้ดูแลระบบ · จำลอง" }
 ];
 export type Asset = {
+  accountingPending?: boolean;
   id: string; hospitalId: string; assetNo: string; name: string; serialNo: string;
   category: string; wardId: string; status: string; version: number; cost: number;
   depreciation: number; verified: boolean; poNo: string; critical: boolean;
 };
 export type DemoState = {
   planning?: PlanningState;
+  assetNumbering?: NumberingState;
   assets: Asset[]; receipts: any[]; conflicts: any[]; audit: any[];
   queue: any[]; payments: any[]; documents: any[]; lastSynced: string | null;
   users?: DemoUser[];

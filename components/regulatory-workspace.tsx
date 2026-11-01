@@ -6,7 +6,7 @@ import {Card,CardHeader,CardTitle,CardContent} from "@/components/ui/card";
 import {departmentNames,regulatoryMappings,regulatorySources,type DepartmentKey} from "@/lib/regulatory";
 import {useSystemActivity} from "@/components/system-activity";
 import {toCsv} from "@/lib/csv.mjs";
-const sourceStatus={FOUND:"พบแหล่งเผยแพร่ทางการ",INDEX:"พบสารบัญ / ยังตรวจเนื้อหาไม่ครบ",LOCAL:"รอคำสั่งและเอกสารจริง"};
+const sourceStatus={ATTACHED:"เอกสารแนบที่ผู้ใช้ให้ตรวจ",FOUND:"พบแหล่งเผยแพร่ทางการ",INDEX:"พบสารบัญ / ยังตรวจเนื้อหาไม่ครบ",LOCAL:"รอคำสั่งและเอกสารจริง"};
 export function RegulatoryNotice({department,open}:{department:DepartmentKey;open:()=>void}){return <div className="demo-banner regulatory-notice"><BookOpen size={17}/><span>ฐานอ้างอิง {departmentNames[department]} · ต้องทวนสอบฉบับและอำนาจที่ใช้จริงก่อนใช้งานราชการ</span><button className="banner-link" onClick={open}>กฎหมายและข้อกำหนด</button></div>;}
 export function RegulatoryWorkspace({department}:{department:DepartmentKey}){
  const [query,setQuery]=useState(""),[sourceFilter,setSourceFilter]=useState("all"),[message,setMessage]=useState("");const report=useSystemActivity();

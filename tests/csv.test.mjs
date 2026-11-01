@@ -49,3 +49,5 @@ test('ส่งออกป้องกันสูตร รวมสูตร�
   for (const prefix of ["'=" , "'+", "'-", "'@", "' \t="]) assert.ok(out.includes(prefix), prefix);
   assert.ok(out.includes('safe,""value""\nnext'));
 });
+
+test('นำเข้าเลขเก่า 4 หลักและใหม่ 5 หลักต้องตรวจลำดับซ้ำข้ามปี',()=>{const result=parse(`${header}\n7110-010-00001/70,Pump,SN901,ICU,Infusion,48000`,['7110-010-0001/69']);assert.equal(result.errors.length,1);});

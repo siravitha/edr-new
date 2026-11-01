@@ -3,7 +3,7 @@ import { z } from 'zod';
 // รับเฉพาะเลขป้ายครุภัณฑ์ ไม่รับ URL, HN หรือข้อความอิสระจากเครื่องสแกน
 export const barcodeSchema = z.string().max(80)
   .transform(value => value.replace(/[\r\n]+$/, ''))
-  .pipe(z.string().regex(/^UTH-\d{2}-\d{5}$/i))
+  .pipe(z.string().regex(/^(?:UTH-\d{2}-\d{5}|\d{4}-\d{3}-\d{4,5}\/\d{2})$/i).refine(value=>/^UTH-/i.test(value)||Number(/-(\d{4,5})\/\d{2}$/.exec(value)?.[1]??0)>0))
   .transform(value => value.toUpperCase());
 
 export const INPUT_APPROVAL_POLICY = Object.freeze({
