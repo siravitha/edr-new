@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../backend/node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum AssetStatus {
+  AVAILABLE
+  IN_USE
+  REPAIR
+  QUARANTINED
+  DISPOSED
+}
+
+model Plan {
+  id          String @id @default(uuid()) @db.Char(36)
+  hospitalId  String @db.Char(36)
+  fiscalYear  Int
+  title       String @db.VarChar(255)
+  approved    Boolean @default(false)
+  budget      Decimal @db.Decimal(18, 2)
+  orders      PurchaseOrder[]
+  @@unique([hospitalId, id])
+}
+
+model PurchaseOrder {
+  id          String @id @default(uuid()) @db.Char(36)
+  hospitalId  String @db.Char(36)
+  planId      String @db.Char(36)
+  number      String @db.VarChar(80)
+  status      String @default("DRAFT") @db.VarChar(32)
+  plan        Plan @relation(fields: [hospitalId, planId], references: [hospitalId, id])
+  lines       POLine[]
+  claims      PaymentClaim[]
+  exceptions  WorkflowException[]
+  @@unique([hospitalId, id])
+  @@unique([hospitalId, number])
+}
+
+model POLine {
+  id          String @id @default(uuid()) @db.Char(36)
+  hospitalId  String @db.Char(36)
+  poId        String @db.Char(36)
+  description String @db.VarChar(255)
+  quantity    Int
+  unitCost    Decimal @db.Decimal(18, 2)
+  po          PurchaseOrder @relation(fields: [hospitalId, poId], references: [hospitalId, id])
+  receipts    ReceiptLine[]
+  @@unique([hospitalId, id])
+}
+
+model ReceiptLine {
+  id          String @id @default(uuid()) @db.Char(36)
+  hospitalId  String @db.Char(36)
+  poLineId    String @db.Char(36)
+  documentNo  String @db.VarChar(80)
+  acceptedQty Int
+  acceptedAt  DateTime @db.DateTime(3)
+  acceptedBy  String @db.VarChar(191)
+  poLine      POLine @relation(fields: [hospitalId, poLineId], references: [hospitalId, id])
+  assets      Asset[]
+  @@unique([hospitalId, id])
+}
+
+model Asset {
+  id          String @id @default(uuid()) @db.Char(36)
+  hospitalId  String @db.Char(36)
+  wardId      String @db.Char(36)
+  receiptId   String @db.Char(36)
+  assetNo     String @db.VarChar(80)
+  name        String @db.VarChar(255)
+  status      AssetStatus @default(AVAILABLE)
+  version     Int @default(0)
+  needsReview Boolean @default(false)
+  cost        Decimal @db.Decimal(18, 2)
+  receipt     ReceiptLine @relation(fields: [hospitalId, receiptId], references: [hospitalId, id])
+  conflicts   ConflictCase[]
+  journals    JournalEntry[]
+  @@unique([hospitalId, id])
+  @@unique([hospitalId, assetNo])
+  @@index([hospitalId, wardId, status])
+}
+
+model PaymentClaim {
+  id          String @id @default(uuid()) @db.Char(36)
+  hospitalId  String @db.Char(36)
+  poId        String @db.Char(36)
+  claimNo     String @db.VarChar(80)
+  revision    Int
+  status      String @default("DRAFT") @db.VarChar(32)
+  amount      Decimal @db.Decimal(18, 2)
+  reason      String? @db.VarChar(1000)
+  po          PurchaseOrder @relation(fields: [hospitalId, poId], references: [hospitalId, id])
+  @@unique([hospitalId, claimNo, revision])
+}
+
+model JournalEntry {
+  id          String @id @default(uuid()) @db.Char(36)
+  hospitalId  String @db.Char(36)
+  assetId     String @db.Char(36)
+  referenceNo String @db.VarChar(80)
+  accountCode String @db.VarChar(32)
+  debit       Decimal @db.Decimal(18, 2)
+  credit      Decimal @db.Decimal(18, 2)
+  postedAt    DateTime @db.DateTime(3)
+  reversalOf  String? @db.Char(36)
+  asset       Asset @relation(fields: [hospitalId, assetId], references: [hospitalId, id])
+  @@index([hospitalId, assetId])
+}
+
+model WorkflowException {
+  id           String @id @default(uuid()) @db.Char(36)
+  hospitalId   String @db.Char(36)
+  poId         String @db.Char(36)
+  type         String @db.VarChar(64)
+  reason       String @db.VarChar(1000)
+  ownerSubject String @db.VarChar(191)
+  status       String @default("OPEN") @db.VarChar(32)
+  dueAt        DateTime? @db.DateTime(3)
+  createdAt    DateTime @default(now()) @db.DateTime(3)
+  po           PurchaseOrder @relation(fields: [hospitalId, poId], references: [hospitalId, id])
+  @@index([hospitalId, status, dueAt])
+}
+
+model AuditLog {
+  id           String @id @default(uuid()) @db.Char(36)
+  hospitalId   String @db.Char(36)
+  assetId      String @db.Char(36)
+  actorSubject String @db.VarChar(191)
+  providerRef  String? @db.VarChar(191)
+  deviceId     String @db.Char(36)
+  mutationId   String @db.Char(36)
+  ip           String @db.VarChar(45)
+  eventType    String @db.VarChar(64)
+  detail       Json
+  createdAt    DateTime @default(now()) @db.DateTime(3)
+  @@index([hospitalId, assetId, createdAt])
+}
+
+model SyncReceipt {
+  id           String @id @default(uuid()) @db.Char(36)
+  hospitalId   String @db.Char(36)
+  deviceId     String @db.Char(36)
+  mutationId   String @db.Char(36)
+  actorSubject String @db.VarChar(191)
+  requestHash  String @db.Char(64)
+  result       Json
+  createdAt    DateTime @default(now()) @db.DateTime(3)
+  @@unique([hospitalId, deviceId, mutationId])
+}
+
+model ConflictCase {
+  id              String @id @default(uuid()) @db.Char(36)
+  hospitalId      String @db.Char(36)
+  assetId         String @db.Char(36)
+  baseVersion     Int
+  currentVersion  Int
+  proposedStatus  AssetStatus
+  deviceId        String @db.Char(36)
+  mutationId      String @db.Char(36)
+  status          String @default("OPEN") @db.VarChar(24)
+  createdAt       DateTime @default(now()) @db.DateTime(3)
+  asset           Asset @relation(fields: [hospitalId, assetId], references: [hospitalId, id])
+  @@index([hospitalId, assetId, status])
+}
