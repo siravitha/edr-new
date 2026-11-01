@@ -1,6 +1,7 @@
 "use client";
 import { useRef, useState, useEffect } from "react";
 import { Plus, Printer, ClipboardList, CheckCircle2, ArrowRight, FolderClock, Paperclip, Download, Upload } from "lucide-react";
+import { useSystemActivity } from "@/components/system-activity";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { amount, hasCurrentBooklet, demandLabels, emptyPlanning, funds, kinds, planLabels, planningTransition, roleNames, roundAccepts, type Demand, type Item, type Plan, type PlanningActor, type PlanningCommand, type PlanningState, type Round } from "@/lib/planning";
@@ -27,6 +28,7 @@ function Dialog({title,close,children,feedback}:{title:string;close:()=>void;chi
   return <dialog ref={ref} className="master-dialog planning-dialog" onCancel={e=>{e.preventDefault();close();}}><div className="modal-header"><h2>{title}</h2><button type="button" className="btn-icon" onClick={close} aria-label="ปิด">×</button></div><div className="modal-body">{feedback.message&&<div role={feedback.error?"alert":"status"} className={`planning-message ${feedback.error?"error":""}`}>{feedback.message}</div>}{children}</div></dialog>;
 }
 export function PlanningWorkspace({page,state:provided,departments,profile,editable,offline,onChange}:{page:PlanningPage;state?:PlanningState;departments:MasterRecord[];profile?:HospitalProfile;editable:boolean;offline:boolean;onChange:(state:PlanningState,file?:PlanningFileWrite)=>Promise<boolean>}) {
+  const activity=useSystemActivity();
   const state=provided??emptyPlanning();const active=departments.filter(d=>d.status==="ACTIVE");
   const [actor,setActor]=useState<PlanningActor>({role:"planner",department:active[0]?.id??""});
   const [roundId,setRoundId]=useState("");const [year,setYear]=useState("all");const [fund,setFund]=useState("all");const [search,setSearch]=useState("");
@@ -50,27 +52,28 @@ export function PlanningWorkspace({page,state:provided,departments,profile,edita
   const oldBooklets=selectedPlan?state.audit.filter(e=>e.action==="ATTACH_BOOKLET"&&e.target===selectedPlan.id).map(e=>(e.after as {plan?:Plan}).plan?.booklet).filter((b):b is NonNullable<Plan["booklet"]>=>!!b&&b.fileId!==selectedPlan.booklet?.fileId):[];
   const associatedPlan=(id:string)=>state.plans.find(p=>p.demandIds.includes(id));
   const visibleAudit=state.audit.filter(e=>scopeAll||state.demands.some(d=>d.id===e.target&&d.department===actor.department));
+  const logPlanning=(event:Parameters<typeof activity>[0])=>activity({...event,module:"planning",actorId:`demo-${actor.role}`,role:actor.role,department:actor.department});
   async function run(command:PlanningCommand,close=false,file?:PlanningFileWrite) {
     if(busy.current||!canWrite){setMessage("ยังไม่พร้อมบันทึก กรุณารอหรือปิดแท็บทดลองอื่น");setError(true);return;}
     const draftOnly=["SAVE_DEMAND","CREATE_ROUND"].includes(command.type);
-    if(offline&&!draftOnly){setMessage("ขณะออฟไลน์บันทึกร่างได้เท่านั้น การส่งและอนุมัติต้องออนไลน์");setError(true);return;}
+    if(offline&&!draftOnly){void logPlanning({action:command.type,target:"id" in command?command.id:command.type,outcome:"REJECTED",reason:"ออฟไลน์"});setMessage("ขณะออฟไลน์บันทึกร่างได้เท่านั้น การส่งและอนุมัติต้องออนไลน์");setError(true);return;}
     busy.current=true;setSaving(true);
     try {if(["SUBMIT_PLAN","SEND_SSO","CFO_APPROVE","DIRECTOR_APPROVE"].includes(command.type)&&"id" in command){const plan=state.plans.find(p=>p.id===command.id);if(plan?.booklet){const blob=await loadPlanningFile(plan.booklet.fileId);const info=await inspectPlanningPdf(plan.booklet.name,blob.type,new Uint8Array(await blob.arrayBuffer()));if(info.sha256!==plan.booklet.sha256||info.size!==plan.booklet.size)throw new Error("ไฟล์ PDF ไม่ตรงกับที่บันทึก กรุณาแนบเล่มใหม่");}}if(command.type==="ATTACH_BOOKLET"&&(!file||file.id!==command.file.fileId))throw new Error("ต้องบันทึกไฟล์ PDF พร้อมข้อมูลแผน");const next=planningTransition(state,command,actor,state.revision);if(await onChange(next,file)){setMessage("บันทึกข้อมูลจำลองในเครื่องแล้ว");setError(false);if(close)setModal(null);}else{setMessage("บันทึกไม่สำเร็จ ข้อมูลยังไม่ถูกยืนยัน");setError(true);}}
-    catch(e){setMessage(e instanceof Error?e.message:"ทำรายการไม่สำเร็จ");setError(true);}finally{busy.current=false;setSaving(false);}
+    catch(e){await logPlanning({action:command.type,target:"id" in command?command.id:command.type,outcome:"REJECTED",reason:e instanceof Error?e.message:"ทำรายการไม่สำเร็จ"});setMessage(e instanceof Error?e.message:"ทำรายการไม่สำเร็จ");setError(true);}finally{busy.current=false;setSaving(false);}
   }
   async function attachBooklet(plan:Plan,file:File,note:string){
     if(!canWrite||offline)return;setUploading(true);
     try {if(file.size>10*1024*1024)throw new Error("ไฟล์ PDF ต้องมีขนาดไม่เกิน 10 MB");const bytes=new Uint8Array(await file.arrayBuffer());const info=await inspectPlanningPdf(file.name,file.type,bytes);await run({type:"ATTACH_BOOKLET",id:plan.id,file:info,reason:note},false,{id:info.fileId,blob:new Blob([bytes],{type:"application/pdf"})});}
-    catch(e){setMessage(e instanceof Error?e.message:"แนบไฟล์ไม่สำเร็จ");setError(true);}finally{setUploading(false);}
+    catch(e){await logPlanning({action:"ATTACH_BOOKLET",target:plan.id,outcome:"REJECTED",reason:e instanceof Error?e.message:"แนบไฟล์ไม่สำเร็จ",after:{name:file.name,size:file.size}});setMessage(e instanceof Error?e.message:"แนบไฟล์ไม่สำเร็จ");setError(true);}finally{setUploading(false);}
   }
   async function downloadBooklet(booklet:NonNullable<Plan["booklet"]>){
-    try {const blob=await loadPlanningFile(booklet.fileId);const info=await inspectPlanningPdf(booklet.name,blob.type,new Uint8Array(await blob.arrayBuffer()));if(info.sha256!==booklet.sha256)throw new Error("ไฟล์ไม่ตรงกับที่บันทึก");const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download=booklet.name;link.click();setTimeout(()=>URL.revokeObjectURL(url),10000);}
-    catch(e){setMessage(e instanceof Error?e.message:"อ่านไฟล์ไม่สำเร็จ");setError(true);}
+    try {const blob=await loadPlanningFile(booklet.fileId);const info=await inspectPlanningPdf(booklet.name,blob.type,new Uint8Array(await blob.arrayBuffer()));if(info.sha256!==booklet.sha256)throw new Error("ไฟล์ไม่ตรงกับที่บันทึก");if(!await logPlanning({action:"DOWNLOAD_BOOKLET",target:booklet.fileId,after:{name:booklet.name,sha256:booklet.sha256}}))throw new Error("บันทึก Log การดาวน์โหลดไม่สำเร็จ");const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download=booklet.name;link.click();setTimeout(()=>URL.revokeObjectURL(url),10000);}
+    catch(e){await logPlanning({action:"DOWNLOAD_BOOKLET",target:booklet.fileId,outcome:"ERROR",reason:e instanceof Error?e.message:"อ่านไฟล์ไม่สำเร็จ"});setMessage(e instanceof Error?e.message:"อ่านไฟล์ไม่สำเร็จ");setError(true);}
   }
   function openDemand(d?:Demand) {setReviewPlanId("");setEditId(d?.id??"");setItem(d?structuredClone(d.item):blankItem());setDemandRound(d?.roundId??roundId??"");setSupplemental(d?.supplemental??false);setReason("");setModal("demand");}
-  function openDetail(id:string,kind:"detail"|"plan") {setSelectedId(id);setReason("");setLetter("");setLetterDate(today());setModal(kind);}
+  function openDetail(id:string,kind:"detail"|"plan") {void logPlanning({action:"VIEW_DETAIL",target:id,outcome:"OBSERVED",after:{kind}});setSelectedId(id);setReason("");setLetter("");setLetterDate(today());setModal(kind);}
   function editItem(d:Demand) {setReviewPlanId("");setEditId(d.id);setItem(structuredClone(d.item));setDemandRound(d.roundId);setSupplemental(d.supplemental);setReason("");setModal("demand");}
-  function print(kind:"demand"|"plan",id:string){setPrintDoc({kind,id});}
+  async function print(kind:"demand"|"plan",id:string){if(await logPlanning({action:"PRINT_REQUESTED",target:id,outcome:"OBSERVED",after:{kind}}))setPrintDoc({kind,id});else{setMessage("บันทึก Log การขอพิมพ์ไม่สำเร็จ");setError(true);}}
   useEffect(()=>{if(printDoc)window.print();},[printDoc]);
   const itemFormRound=state.rounds.find(r=>r.id===demandRound);
   const reviewMode=!!editId&&actor.role!=="requester";

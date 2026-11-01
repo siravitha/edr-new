@@ -4,6 +4,9 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Activity, ArrowDownToLine, ArrowRight, ArrowUpRight, Bell, Box, Building2, ChartNoAxesCombined, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, ClipboardCheck, ClipboardList, FileCheck2, FileText, FolderClock, HeartPulse, History, Layers3, Menu, MoreHorizontal, Package, Plus, QrCode, RefreshCw, Search, Settings2, ShieldCheck, Upload, Wallet, Wifi, WifiOff, X } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { PlanningWorkspace, planningSections, type PlanningPage } from "@/components/planning-workspace";
+import { SystemLogViewer } from "@/components/system-log-viewer";
+import { SystemActivityContext } from "@/components/system-activity";
+import type { Activity as SystemActivity, LogContext } from "@/lib/system-log";
 import { LifecycleWorkspace } from "@/components/lifecycle-workspace";
 import { UserManagement } from "@/components/user-management";
 import { MasterDataManagement, HospitalProfileManagement } from "@/components/master-data-management";
@@ -11,7 +14,7 @@ import { createMasterData } from "@/lib/master-data.mjs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { categories, createSeed, HOSPITAL, paymentLabels, roles, statusLabels, wards, type Asset, type DemoState } from "@/lib/seed";
-import { loadState, saveState, type PlanningFileWrite } from "@/lib/storage";
+import { loadState, saveState, appendSystemActivity, initializeSystemLog, type PlanningFileWrite } from "@/lib/storage";
 import { transitionAsset, transitionPayment } from "@/lib/domain.mjs";
 import { parseAssetCsv, toCsv } from "@/lib/csv.mjs";
 
@@ -22,7 +25,7 @@ const nav = [
   { id: "procurement", label: "วงจรพัสดุ 15 ขั้นตอน", icon: ClipboardList },
   { id: "documents", label: "เอกสารและหลักฐาน", icon: FileCheck2 },
   { id: "sync", label: "คิวซิงก์และข้อขัดแย้ง", icon: RefreshCw },
-  { id: "audit", label: "ประวัติการดำเนินการ", icon: History },
+  { id: "audit", label: "Log system", icon: History },
   { id: "integrations", label: "การเชื่อมต่อระบบ", icon: Settings2 },
   { id: "reports", label: "รายงาน", icon: FileText },
   { id: "hospital", label: "ข้อมูลโรงพยาบาล", icon: HeartPulse },
@@ -31,7 +34,7 @@ const nav = [
   { id: "users", label: "จัดการผู้ใช้งาน", icon: ShieldCheck },
   { id: "vendors", label: "จัดการผู้ค้ากับโรงพยาบาล", icon: Package }
 ] as const;
-const settingsPages: readonly string[] = ["hospital", "document-codes", "departments", "users", "vendors", "integrations"];
+const settingsPages: readonly string[] = ["hospital", "document-codes", "departments", "users", "vendors", "integrations", "audit"];
 const reportSections = [
   { id: "reports-strategy", label: "ฝ่ายแผนงานและยุทธศาสตร์" },
   { id: "reports-procurement", label: "ฝ่ายพัสดุกลาง" },
@@ -84,6 +87,8 @@ export default function Home() {
   const [ready, setReady] = useState(false);
   const [page, setPage] = useState<Page>("dashboard");
   const [role, setRole] = useState("executive");
+  const [sessionId] = useState(uid);
+  const priorRole = useRef("executive");
   const [offline, setOffline] = useState(false);
   const [networkOnline, setNetworkOnline] = useState(true);
   const [menu, setMenu] = useState(false);
@@ -132,12 +137,14 @@ export default function Home() {
   const pendingPayments = data.payments.filter(p => p.overdue && !["PAID", "APPROVED"].includes(p.status)).length;
   const payment = data.payments.find(p => p.id === paymentId);
 
-  function notify(message: string, error = false) { setToast({ message, error }); }
-  async function commit(next: DemoState, file?: PlanningFileWrite) {
+  const logContext:LogContext={actorId:actor.id,role,sessionId,deviceId:actor.deviceId,page};
+  async function reportActivity(activity:SystemActivity){try{await appendSystemActivity(logContext,activity);return true;}catch{setToast({message:"บันทึก Log ไม่สำเร็จ กรุณาลองใหม่",error:true});return false;}}
+  function notify(message: string, error = false) { setToast({ message, error }); if(error)void reportActivity({action:"OPERATION_REJECTED",outcome:"REJECTED",reason:message}); }
+  async function commit(next: DemoState, file?: PlanningFileWrite, operation?:SystemActivity) {
     if (!editable || writingRef.current || data !== stateRef.current) { notify("มีรายการกำลังบันทึก กรุณารอแล้วลองอีกครั้ง", true); return false; }
     writingRef.current = true;
     setBusy(true);
-    try { await saveState(next, file); stateRef.current = next; setData(next); return true; }
+    try { await saveState(next, file, logContext, operation); stateRef.current = next; setData(next); return true; }
     catch { setStorageError(true); notify("บันทึกในเครื่องไม่สำเร็จ รายการยังไม่ถูกยืนยัน", true); return false; }
     finally { writingRef.current = false; setBusy(false); }
   }
@@ -145,7 +152,7 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     let releaseLock: (() => void) | undefined;
-    loadState().then(value => { if (!cancelled) { stateRef.current = value; setData(value); setReady(true); } }).catch(() => { setStorageError(true); setReady(true); });
+    loadState().then(async value => { await initializeSystemLog(value,logContext);await appendSystemActivity(logContext,{action:"APP_OPEN",module:"session",outcome:"OBSERVED"}); if (!cancelled) { stateRef.current = value; setData(value); setReady(true); } }).catch(() => { setStorageError(true); setReady(true); });
     setNetworkOnline(navigator.onLine);
     const update = () => setNetworkOnline(navigator.onLine);
     window.addEventListener("online", update); window.addEventListener("offline", update);
@@ -164,8 +171,10 @@ export default function Home() {
   }, []);
   useEffect(() => { if (!toast) return; const t = window.setTimeout(() => setToast(null), 5500); return () => clearTimeout(t); }, [toast]);
   useEffect(() => { setOffset(0); }, [query, ward, status, role]);
-  function go(next: Page) { setOpenNav(null);setPage(next); setMenu(false); setQuery(""); setWard("all"); setStatus("all"); window.scrollTo({ top: 0 }); }
-  function download(name: string, contents: string, mime = "text/csv;charset=utf-8") {
+  useEffect(()=>{if(ready&&priorRole.current!==role){void reportActivity({action:"DEMO_ROLE_CHANGED",module:"session",outcome:"OBSERVED",before:{role:priorRole.current},after:{role}});priorRole.current=role;}},[role,ready]);
+  function go(next: Page) { void reportActivity({action:"VIEW_PAGE",module:"navigation",target:next,outcome:"OBSERVED",before:{page},after:{page:next}});setOpenNav(null);setPage(next); setMenu(false); setQuery(""); setWard("all"); setStatus("all"); window.scrollTo({ top: 0 }); }
+  async function download(name: string, contents: string, mime = "text/csv;charset=utf-8") {
+    if(!await reportActivity({action:"EXPORT_FILE",module:"reports",target:name,after:{mime}}))return false;
     const url = URL.createObjectURL(new Blob([contents], { type: mime }));
     const a = document.createElement("a"); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -178,7 +187,7 @@ export default function Home() {
     if (!/^UTH-69-\d{5}$/.test(cleaned)) { notify("รหัสไม่ถูกต้อง เช่น UTH-69-00001", true); return; }
     const asset = scopedAssets.find(a => a.assetNo === cleaned);
     if (!asset) { notify("ไม่พบทะเบียนในขอบเขตที่ได้รับสิทธิ์", true); return; }
-    setScan(cleaned); setScanned(asset); setNextStatus(asset.status === "AVAILABLE" ? "IN_USE" : "REPAIR");
+    void reportActivity({action:"SCAN_LOOKUP",module:"assets",target:asset.assetNo,outcome:"OBSERVED"});setScan(cleaned); setScanned(asset); setNextStatus(asset.status === "AVAILABLE" ? "IN_USE" : "REPAIR");
   }
   async function submitScan() {
     if (!scanned || !editable) return;
@@ -224,7 +233,7 @@ export default function Home() {
     const generation = ++importGeneration.current;
     if (!file) return;
     if (file.size > 1_000_000 || !file.name.toLowerCase().endsWith(".csv")) { notify("รองรับ CSV ไม่เกิน 1 MB", true); return; }
-    try { const source = await file.text(); if (generation !== importGeneration.current) return; importedSource.current = source; setImportResult(parseAssetCsv(source, data.assets.map(a => a.assetNo), scope)); }
+    try { const source = await file.text(); if (generation !== importGeneration.current) return; importedSource.current = source; const result=parseAssetCsv(source, data.assets.map(a => a.assetNo), scope);await reportActivity({action:"VALIDATE_IMPORT",module:"assets",target:file.name,outcome:result.errors.length?"REJECTED":"SUCCESS",after:{valid:result.valid.length,errors:result.errors}});setImportResult(result); }
     catch (error) { notify(error instanceof Error ? error.message : "อ่านไฟล์ไม่สำเร็จ", true); }
   }
   async function confirmImport() {
@@ -247,21 +256,21 @@ export default function Home() {
   }
   const openScan = () => { setScanned(null); setScan(""); setModal("scan"); };
   function assetTable(rows: Asset[], compact = false) {
-    return <div className="table-wrap"><table className="data-table"><thead><tr><th>รายการครุภัณฑ์</th><th>หน่วยงาน</th><th>สถานะ</th>{!compact && <th>มูลค่าตามบัญชี</th>}<th>รุ่นข้อมูล</th><th><span className="sr-only">รายละเอียด</span></th></tr></thead><tbody>{rows.map(a => <tr key={a.id}><td><button className="table-link asset-name" onClick={() => setSelected(a)}><span className="asset-icon"><HeartPulse size={16}/></span><span>{a.name}<small>{a.assetNo} · {a.serialNo}</small></span></button></td><td>{wardName(a.wardId)}</td><td><span className={`badge ${tone(a.status)}`}><span className="status-dot"/>{statusLabels[a.status]}</span></td>{!compact && <td>฿{money(a.cost - a.depreciation)}</td>}<td><span className="version-tag">v{a.version}</span></td><td><button className="table-link" aria-label={`ดู ${a.assetNo}`} onClick={() => setSelected(a)}><ChevronRight size={17}/></button></td></tr>)}</tbody></table>{!rows.length && <div className="empty-state"><Search size={28}/><p>ไม่พบรายการตามเงื่อนไขนี้</p></div>}</div>;
+    return <div className="table-wrap"><table className="data-table"><thead><tr><th>รายการครุภัณฑ์</th><th>หน่วยงาน</th><th>สถานะ</th>{!compact && <th>มูลค่าตามบัญชี</th>}<th>รุ่นข้อมูล</th><th><span className="sr-only">รายละเอียด</span></th></tr></thead><tbody>{rows.map(a => <tr key={a.id}><td><button className="table-link asset-name" onClick={() => {void reportActivity({action:"VIEW_ASSET",module:"assets",target:a.assetNo,outcome:"OBSERVED"});setSelected(a);}}><span className="asset-icon"><HeartPulse size={16}/></span><span>{a.name}<small>{a.assetNo} · {a.serialNo}</small></span></button></td><td>{wardName(a.wardId)}</td><td><span className={`badge ${tone(a.status)}`}><span className="status-dot"/>{statusLabels[a.status]}</span></td>{!compact && <td>฿{money(a.cost - a.depreciation)}</td>}<td><span className="version-tag">v{a.version}</span></td><td><button className="table-link" aria-label={`ดู ${a.assetNo}`} onClick={() => setSelected(a)}><ChevronRight size={17}/></button></td></tr>)}</tbody></table>{!rows.length && <div className="empty-state"><Search size={28}/><p>ไม่พบรายการตามเงื่อนไขนี้</p></div>}</div>;
   }
 
-  return <div className="app-shell">
+  return <SystemActivityContext.Provider value={reportActivity}><div className="app-shell">
     {menu && <button className="sidebar-overlay" onClick={() => setMenu(false)} aria-label="ปิดเมนู"/>}
     <aside className={`sidebar ${menu ? "open" : ""}`}><div className="brand"><div className="brand-icon"><Layers3 size={25}/></div><div className="brand-copy"><strong>UTH Smart Assets</strong><small>โรงพยาบาลอุดรธานี</small></div></div>
       <div className="workspace-label"><Building2 size={15}/><span>ศูนย์บริหารครุภัณฑ์</span><ChevronDown size={13}/></div>
       <div className="nav-section">พื้นที่การทำงาน</div><nav aria-label="เมนูหลัก">{nav.filter(n=>["dashboard"].includes(n.id)).map(n => <button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} aria-current={page === n.id ? "page" : undefined} onClick={() => go(n.id)}><n.icon size={18}/><span>{n.label}</span></button>)}{workspaceSections.map(section=>section.id === "work-strategy" ? <div key={section.id}><button className={`nav-item nav-parent ${selectedPlanningSection ? "nav-parent-current" : ""}`} aria-expanded={planningOpen} aria-controls="planning-submenu" onClick={()=>toggleNav("planning")}><section.icon size={18}/><span>{section.label}</span><ChevronDown size={14} className={`nav-chevron ${planningOpen ? "expanded" : ""}`}/></button>{planningOpen && <div id="planning-submenu" className="nav-submenu">{planningSections.map(n=><button key={n.id} className={`nav-item nav-child ${page===n.id ? "active" : ""}`} aria-current={page===n.id ? "page" : undefined} onClick={()=>go(n.id)}><span>{n.label}</span></button>)}</div>}</div> : section.id === "work-procurement" ? <div key={section.id}><button className={`nav-item nav-parent ${["work-procurement","assets","procurement","documents"].includes(page) ? "nav-parent-current" : ""}`} aria-expanded={procurementOpen} aria-controls="procurement-submenu" onClick={()=>toggleNav("procurement")}><section.icon size={18}/><span>{section.label}</span><ChevronDown size={14} className={`nav-chevron ${procurementOpen ? "expanded" : ""}`}/></button>{procurementOpen && <div id="procurement-submenu" className="nav-submenu">{[{id:"work-procurement",label:"แผนอนุมัติจากฝ่ายแผนฯ",icon:ClipboardList},{id:"assets",label:"ทะเบียนครุภัณฑ์",icon:Box},{id:"procurement",label:"วงจรพัสดุ 15 ขั้นตอน",icon:ClipboardList},{id:"documents",label:"เอกสารและหลักฐาน",icon:FileCheck2}].map(n=><button key={n.id} className={`nav-item nav-child ${page===n.id ? "active" : ""}`} aria-current={page===n.id ? "page" : undefined} onClick={()=>go(n.id as Page)}><n.icon size={16}/><span>{n.label}</span></button>)}</div>}</div> : section.id === "work-finance" ? <div key={section.id}><button className={`nav-item nav-parent ${page === "finance-payments" ? "nav-parent-current" : ""}`} aria-expanded={financeOpen} aria-controls="finance-submenu" onClick={()=>toggleNav("finance")}><section.icon size={18}/><span>{section.label}</span><ChevronDown size={14} className={`nav-chevron ${financeOpen ? "expanded" : ""}`}/></button>{financeOpen && <div id="finance-submenu" className="nav-submenu"><button className={`nav-item nav-child ${page === "finance-payments" ? "active" : ""}`} aria-current={page === "finance-payments" ? "page" : undefined} onClick={()=>go("finance-payments")}><FileText size={16}/><span>คำขอเบิกจ่าย</span>{pendingPayments > 0 && <span className="nav-count">{pendingPayments}</span>}</button></div>}</div> : <button key={section.id} className={`nav-item ${page===section.id ? "active" : ""}`} aria-current={page===section.id ? "page" : undefined} onClick={()=>go(section.id)}><section.icon size={18}/><span>{section.label}</span></button>)}</nav>
       <nav aria-label="รายงาน" className="settings-nav"><button className={`nav-item nav-parent ${page === "reports" || selectedReportSection ? "nav-parent-current" : ""}`} aria-expanded={reportsOpen} aria-controls="reports-submenu" onClick={()=>toggleNav("reports")}><FileText size={18}/><span>รายงาน</span><ChevronDown size={14} className={`nav-chevron ${reportsOpen ? "expanded" : ""}`}/></button>{reportsOpen && <div id="reports-submenu" className="nav-submenu">{reportSections.map(section=><button key={section.id} className={`nav-item nav-child ${page===section.id ? "active" : ""}`} aria-current={page===section.id ? "page" : undefined} onClick={()=>go(section.id)}><span>{section.label}</span></button>)}</div>}</nav>
       <nav aria-label="ตั้งค่าระบบ" className="settings-nav"><button className={`nav-item nav-parent ${settingsPages.includes(page) ? "nav-parent-current" : ""}`} aria-expanded={settingsOpen} aria-controls="settings-submenu" onClick={() => toggleNav("settings")}><Settings2 size={18}/><span>ตั้งค่าระบบ</span><ChevronDown size={14} className={`nav-chevron ${settingsOpen ? "expanded" : ""}`}/></button>{settingsOpen && <div id="settings-submenu" className="nav-submenu">{nav.filter(n=>settingsPages.includes(n.id)).sort((a,b)=>settingsPages.indexOf(a.id)-settingsPages.indexOf(b.id)).map(n=><button key={n.id} className={`nav-item nav-child ${page === n.id ? "active" : ""}`} aria-current={page === n.id ? "page" : undefined} onClick={() => go(n.id)}><n.icon size={16}/><span>{n.label}</span></button>)}</div>}</nav>
-      <div className="nav-section">การควบคุมและตรวจสอบ</div><nav aria-label="เมนูตรวจสอบ">{nav.filter(n => ["sync","audit"].includes(n.id)).map(n => <button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => go(n.id)}><n.icon size={18}/><span>{n.label}</span>{n.id === "sync" && (data.queue.length + data.conflicts.length > 0) && <span className="nav-count">{data.queue.length + data.conflicts.length}</span>}</button>)}</nav>
+      <div className="nav-section">การควบคุมและตรวจสอบ</div><nav aria-label="เมนูตรวจสอบ">{nav.filter(n => ["sync"].includes(n.id)).map(n => <button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => go(n.id)}><n.icon size={18}/><span>{n.label}</span>{n.id === "sync" && (data.queue.length + data.conflicts.length > 0) && <span className="nav-count">{data.queue.length + data.conflicts.length}</span>}</button>)}</nav>
       <div className="sidebar-footer"><div className="sidebar-security"><ShieldCheck size={16}/><span>ต้นแบบ · ข้อมูลจำลองเท่านั้น</span></div><div className="footer-company">พัฒนาโดย <strong>Pacific Plus IT</strong><br/><span>SMARTER ASSETS. BETTER CARE.</span></div></div>
     </aside>
     <div className="main-panel"><header className="topbar"><div className="breadcrumb"><button className="mobile-menu" aria-label="เปิดเมนู" onClick={() => setMenu(true)}><Menu size={21}/></button><span>ระบบบริหารครุภัณฑ์</span><ChevronRight size={13}/><strong>{title}</strong></div><div className="topbar-actions"><span className={`connection-indicator ${isOffline ? "is-offline" : ""}`}>{isOffline ? <WifiOff size={14}/> : <Wifi size={14}/>} {isOffline ? "ออฟไลน์" : "พร้อมทดลอง"}</span><button className="help-btn" aria-label="วิธีทดลอง" onClick={() => setModal("help")}><CircleHelp size={19}/></button><div className="topbar-divider"/><div className="avatar">พพ</div><label className="role-picker"><small>มุมมองจำลอง</small><select aria-label="เลือกบทบาทจำลอง" value={role} onChange={e => setRole(e.target.value)}>{roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label></div></header>
-      <main className="main-content"><div className="page-heading"><div><span className="eyebrow">UDON THANI HOSPITAL</span><h1>{title}</h1><p>ทุกครุภัณฑ์มีคุณค่า เพื่อการดูแลที่ดีกว่า {!selectedPlanningSection && <span className="heading-date">· ปีงบประมาณ 2569 · ชุดข้อมูลตัวอย่าง</span>}</p></div>{!selectedPlanningSection && <div className="heading-actions"><Button variant="secondary" onClick={exportAssets}><ArrowDownToLine size={15}/>ส่งออกรายงาน</Button><Button onClick={openScan} disabled={!ready}><QrCode size={16}/>สแกนครุภัณฑ์</Button></div>}</div>
+      <main className="main-content"><div className="page-heading"><div><span className="eyebrow">UDON THANI HOSPITAL</span><h1>{title}</h1><p>ทุกครุภัณฑ์มีคุณค่า เพื่อการดูแลที่ดีกว่า {!selectedPlanningSection && <span className="heading-date">· ปีงบประมาณ 2569 · ชุดข้อมูลตัวอย่าง</span>}</p></div>{!selectedPlanningSection && page!=="audit" && <div className="heading-actions"><Button variant="secondary" onClick={exportAssets}><ArrowDownToLine size={15}/>ส่งออกรายงาน</Button><Button onClick={openScan} disabled={!ready}><QrCode size={16}/>สแกนครุภัณฑ์</Button></div>}</div>
       <div className="demo-banner"><ShieldCheck size={16}/><span><strong>พื้นที่ทดลองใช้งาน</strong> ข้อมูลทั้งหมดเป็นข้อมูลจำลอง เก็บเฉพาะในเบราว์เซอร์นี้ · ยังไม่เชื่อมระบบโรงพยาบาล</span><button className="banner-link" onClick={() => setModal("help")}>วิธีทดลอง <ArrowUpRight size={12}/></button></div>
       {(!ready || storageError || duplicateTab) && <div className="offline-banner" role="status">{!ready ? "กำลังโหลดข้อมูลที่เก็บไว้ในเครื่อง…" : duplicateTab ? "เปิดอยู่หลายแท็บ: แท็บนี้ดูข้อมูลได้เท่านั้น กรุณาทดลองแก้ไขในแท็บแรก" : "เบราว์เซอร์ไม่อนุญาตให้จัดเก็บข้อมูล จึงปิดการเปลี่ยนแปลงเพื่อป้องกันข้อมูลหาย"}</div>}
       {isOffline && <div className="offline-banner"><WifiOff size={16}/>โหมดออฟไลน์: คำสั่งสแกนจะเก็บในเครื่องและรอซิงก์ · งานอนุมัติถูกพักไว้</div>}
@@ -305,7 +314,7 @@ export default function Home() {
 
       {page === "documents" && <><div className="demo-banner"><FileCheck2 size={17}/><span>ขั้นตอนหลักฐาน: ตรึงรุ่น → พิมพ์ → ลงหมึก → สแกน → ตรวจเทียบ → รับรองสำเนา · หน้านี้แสดงตัวอย่าง ยังไม่รับอัปโหลดหลักฐานจริง</span></div>{data.documents.map(d => <Card className="section-gap" key={d.id}><CardHeader><div><CardTitle>{d.title}</CardTitle><p className="panel-subtitle">{d.ref} · รุ่น {d.revision} · {d.poNo}</p></div><span className={`badge ${d.status === "SIGNED_COPY_VERIFIED" ? "success" : "warning"}`}>{d.status === "SIGNED_COPY_VERIFIED" ? "ตัวอย่างสำเนาตรวจแล้ว" : "รอลายเซ็นหมึก"}</span></CardHeader><CardContent><div className="detail-grid"><div><div className="detail-label">ตำแหน่งต้นฉบับกระดาษ</div><div className="detail-value">{d.location}</div></div><div><div className="detail-label">ความครบถ้วนของหลักฐาน</div><div className="detail-value">ต้องเก็บ PDF ต้นฉบับ / hash / สำเนาลงนามแยกกัน</div></div></div><p className="muted">ยังไม่มีไฟล์จริงในต้นแบบ · การเข้าสู่ระบบไม่เท่ากับการลงนามรับรองเอกสาร</p></CardContent></Card>)}</>}
 
-      {page === "audit" && <><div className="toolbar"><p className="muted">ประวัติในเครื่องสำหรับทดลอง · ไม่ใช่คลัง audit แบบป้องกันแก้ไขของระบบจริง</p><Button variant="secondary" onClick={() => download("uth-audit-demo.csv", toCsv([["ลำดับ", "ผู้ทำรายการ", "รายการ", "เหตุการณ์", "รุ่นก่อน", "รุ่นหลัง"], ...data.audit.map(e => [e.sequence, e.actorId, e.assetId ?? "IMPORT", e.outcome, e.beforeVersion, e.afterVersion])]))}><ArrowDownToLine size={14}/>ส่งออกประวัติ</Button></div><Card><div className="table-wrap"><table className="data-table"><thead><tr><th>ลำดับ</th><th>ผู้ทำรายการ / อุปกรณ์</th><th>รายการ</th><th>เหตุการณ์</th><th>รุ่นข้อมูล</th></tr></thead><tbody>{[...data.audit].reverse().map(e => <tr key={e.sequence}><td>#{e.sequence}</td><td>{e.actorId}<br/><small>{e.deviceId}</small></td><td>{data.assets.find(a => a.id === e.assetId)?.assetNo ?? e.assetId ?? "นำเข้าข้อมูล"}</td><td><span className={`badge ${e.outcome === "CONFLICT" ? "danger" : "info"}`}>{e.outcome}</span><div className="muted">{e.code}</div></td><td>{e.beforeVersion ?? "—"} → {e.afterVersion ?? "—"}</td></tr>)}</tbody></table></div></Card></>}
+      {page === "audit" && <SystemLogViewer role={role} switchRole={()=>setRole("auditor")}/>}
 
       {page === "integrations" && <><div className="split-grid">{[{ name: "HOSxP", icon: Building2, text: "ยังไม่เชื่อมต่อ · ตัวเชื่อมต้องใช้สำเนาข้อมูลอ่านอย่างเดียวและสิทธิ์ที่โรงพยาบาล/BMS อนุญาต" }, { name: "MOPH Provider ID", icon: ShieldCheck, text: "ยังไม่เชื่อมต่อ · ตัวเลือกบทบาทในหน้านี้เป็นการจำลอง ไม่ใช่การเข้าสู่ระบบหรือหลักฐาน 2FA" }, { name: "Aruba BLE / IoT", icon: Wifi, text: "ยังไม่เชื่อมต่อ · รับ telemetry ผ่าน AP/Gateway แล้วเข้าคิว ไม่แก้ผู้ครอบครองจากสัญญาณโดยตรง" }, { name: "Node.js / Prisma / MySQL", icon: Layers3, text: "มีซอร์สบริการและสคีมาแยกไว้ · หน้านี้ใช้ IndexedDB ในเบราว์เซอร์ ยังไม่เชื่อมฐานข้อมูลโรงพยาบาล" }].map(c => <div className="connection-card" key={c.name}><div className="connection-title"><c.icon size={24}/><span className="badge neutral">ยังไม่เชื่อม</span></div><h3>{c.name}</h3><p className="muted">{c.text}</p></div>)}</div><Card><CardHeader><CardTitle>เครื่องมือพื้นที่ทดลอง</CardTitle></CardHeader><CardContent><div className="toolbar"><span className="muted">ล้างเฉพาะข้อมูลจำลองในเบราว์เซอร์นี้ เพื่อเริ่มทดลองใหม่</span><Button variant="secondary" disabled={!editable} onClick={() => setModal("reset")}>รีเซ็ตข้อมูลจำลอง</Button></div><p className="muted">การนำเข้ารองรับ CSV ในรุ่นนี้ · OCR, Excel .xlsx, RFID และการตรวจรับรองข้อขัดแย้งโดยหัวหน้าคลังยังต้องพัฒนาต่อ</p></CardContent></Card></>}
       </main>
@@ -320,7 +329,7 @@ export default function Home() {
     {modal === "payment" && payment && <Modal title={`${payment.claimNo} · รุ่น ${payment.revision}`} close={() => setModal(null)} footer={<>{payment.status === "SUBMITTED" && role === "finance" && <><Button variant="secondary" disabled={!editable || isOffline || !reason.trim()} onClick={() => paymentAction("RETURN")}>ส่งคืนแก้ไข</Button><Button disabled={!editable || isOffline || !evidence || !signature} onClick={() => paymentAction("APPROVE")}>อนุมัติจำลอง</Button></>}{payment.status === "RETURNED" && role === "procurement" && <Button disabled={!editable || isOffline} onClick={() => paymentAction("RESUBMIT")}>สร้างรุ่นใหม่และส่งตรวจ</Button>}</>}><h3>{payment.title}</h3><div className="stat-row"><span>สถานะจัดซื้อ</span><span className="badge neutral">{payment.poNo} · CLOSED</span></div><div className="stat-row"><span>สถานะคำขอ</span><span className={`badge ${tone(payment.status)}`}>{paymentLabels[payment.status]}</span></div><div className="stat-row"><span>จำนวนเงิน</span><strong>฿{money(payment.amount)}</strong></div>{payment.returnReason && <p className="warning-text">เหตุผลส่งคืน: {payment.returnReason}</p>}{payment.status === "SUBMITTED" && role === "finance" && <><label className="form-field section-gap-top">เหตุผลส่งคืน<textarea rows={3} value={reason} maxLength={2000} onChange={e => setReason(e.target.value)} placeholder="เช่น ใบแจ้งหนี้ไม่ตรงกับเอกสารตรวจรับ"/></label><label className="checkbox-row"><input type="checkbox" checked={evidence} onChange={e => setEvidence(e.target.checked)}/>จำลองผลตรวจหลักฐานครบถ้วน</label><label className="checkbox-row"><input type="checkbox" checked={signature} onChange={e => setSignature(e.target.checked)}/>จำลองผลตรวจลายเซ็นและผู้มีอำนาจ</label></>}{payment.history?.length > 0 && <p className="muted">คงสำเนารุ่นเดิมไว้ {payment.history.length} รุ่นในข้อมูลสาธิต</p>}<p className="muted">การติ๊กช่องเป็นการจำลองเท่านั้น ระบบจริงต้องตรวจหลักฐานที่เซิร์ฟเวอร์และยืนยันตัวตนตามอำนาจอนุมัติ</p>{!["finance", "procurement"].includes(role) && <p className="warning-text">เปลี่ยนมุมมองเป็นการเงินหรือพัสดุเพื่อทดลองขั้นตอน</p>}</Modal>}
 
     {modal === "help" && <Modal title="เริ่มทดลองใน 3 นาที" close={() => setModal(null)} footer={<Button onClick={() => { setRole("warehouse"); setModal(null); go("sync"); }}>เริ่มที่คิวออฟไลน์ <ArrowRight size={15}/></Button>}><ol className="help-steps"><li><strong>เลือกบทบาทเจ้าหน้าที่คลัง</strong><p>ใช้ตัวเลือกมุมมองจำลองมุมขวาบน</p></li><li><strong>ทดลองสแกนและออฟไลน์</strong><p>หน้า “คิวซิงก์” → จำลองออฟไลน์ → สแกน → ลองรหัสตัวอย่าง → ยืนยัน จากนั้นกลับออนไลน์และซิงก์</p></li><li><strong>ลองข้อมูลขัดแย้ง</strong><p>กด “จำลองแท็บเล็ตสองเครื่องชนกัน” แล้วดูทั้งสองสถานะและรุ่นข้อมูล</p></li><li><strong>ลองการเงินส่งคืนหลังปิด PO</strong><p>เลือกบทบาทการเงิน → ตรวจรายการแรก → ใส่เหตุผลส่งคืน จากนั้นเปลี่ยนเป็นพัสดุเพื่อสร้างคำขอรุ่นใหม่</p></li></ol><p className="muted">ข้อมูลเก็บใน IndexedDB ของเบราว์เซอร์ ไม่ส่งไปฐานข้อมูลโรงพยาบาล รีเซ็ตได้จากหน้าการเชื่อมต่อ</p></Modal>}
-    {modal === "reset" && <Modal title="เริ่มข้อมูลจำลองใหม่" close={() => setModal(null)} footer={<><Button variant="secondary" onClick={() => setModal(null)}>ยกเลิก</Button><Button disabled={!editable} onClick={async () => { if (await commit(createSeed())) { setModal(null); notify("รีเซ็ตเฉพาะข้อมูลจำลองแล้ว"); } }}>ยืนยันรีเซ็ต</Button></>}><p>คำสั่งออฟไลน์ ประวัติ และรายการนำเข้าในเบราว์เซอร์นี้จะถูกแทนด้วยชุดข้อมูลตัวอย่างเริ่มต้น</p></Modal>}
+    {modal === "reset" && <Modal title="เริ่มข้อมูลจำลองใหม่" close={() => setModal(null)} footer={<><Button variant="secondary" onClick={() => setModal(null)}>ยกเลิก</Button><Button disabled={!editable} onClick={async () => { if (await commit(createSeed(),undefined,{action:"RESET_DEMO_DATA",module:"settings",target:"demo-state",reason:"ผู้ใช้ยืนยันรีเซ็ตข้อมูลจำลอง โดยคง Log system"})) { setModal(null); notify("รีเซ็ตเฉพาะข้อมูลจำลองแล้ว"); } }}>ยืนยันรีเซ็ต</Button></>}><p>คำสั่งออฟไลน์และข้อมูลธุรกิจในเบราว์เซอร์นี้จะถูกแทนด้วยชุดข้อมูลตัวอย่างเริ่มต้น โดย Log system ยังคงเก็บประวัติเดิมและบันทึกการรีเซ็ต</p></Modal>}
     {toast && <div role="status" className={`toast ${toast.error ? "toast-error" : "toast-success"}`}>{toast.message}</div>}
-  </div>;
+  </div></SystemActivityContext.Provider>;
 }

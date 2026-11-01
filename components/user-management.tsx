@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Pencil, Plus, Search, ShieldCheck, UserRound, X } from "lucide-react";
+import { useSystemActivity } from "@/components/system-activity";
 import { Button } from "@/components/ui/button";
 import { createDemoUsers, saveDemoUser, toggleDemoUser, cancelDemoUser, normalizeDemoUsers, userRoleOptions, type DemoUser, type UserDraft } from "@/lib/users.mjs";
 import { wards } from "@/lib/seed";
@@ -21,6 +22,7 @@ type Props = {
 };
 
 export function UserManagement({ users, departmentOptions, actorRole, editable, switchToAdmin, onChange }: Props) {
+  const report=useSystemActivity();
   const [seed] = useState(createDemoUsers);
   const records = normalizeDemoUsers(users ?? seed);
   const departments = departmentOptions ?? fallbackDepartments;
@@ -46,7 +48,7 @@ export function UserManagement({ users, departmentOptions, actorRole, editable, 
       if (await onChange(next,draft.id ? "USER_DEMO_UPDATED" : "USER_DEMO_ADDED",draft.staffCode.toUpperCase())) {
         setDraft(null); setMessage("บันทึกผู้ใช้จำลองแล้ว · ยังไม่ได้สร้างบัญชีจริงหรือส่งคำเชิญ");
       } else setError("บันทึกไม่สำเร็จ กรุณาตรวจสิทธิ์และการจัดเก็บข้อมูลในเครื่อง");
-    } catch(e) { setError(e instanceof Error ? e.message : "ข้อมูลไม่ถูกต้อง"); }
+    } catch(e) { void report({action:"VALIDATION_REJECTED",module:"settings",outcome:"REJECTED",reason:e instanceof Error?e.message:"ข้อมูลไม่ถูกต้อง"}); setError(e instanceof Error ? e.message : "ข้อมูลไม่ถูกต้อง"); }
     finally { pending.current=false; setSaving(false); }
   }
   async function toggle(user: DemoUser) {
@@ -55,14 +57,14 @@ export function UserManagement({ users, departmentOptions, actorRole, editable, 
     try {
       const next=toggleDemoUser(records,user.id,actorRole);
       if (await onChange(next,"USER_DEMO_STATUS_CHANGED",user.staffCode)) setMessage("เปลี่ยนสถานะผู้ใช้จำลองแล้ว · ไม่กระทบบัญชีหรือสิทธิ์จริง");
-    } catch(e) { setError(e instanceof Error ? e.message : "ดำเนินการไม่สำเร็จ"); }
+    } catch(e) { void report({action:"VALIDATION_REJECTED",module:"settings",outcome:"REJECTED",reason:e instanceof Error?e.message:"ข้อมูลไม่ถูกต้อง"}); setError(e instanceof Error ? e.message : "ดำเนินการไม่สำเร็จ"); }
     finally {pending.current=false;setSaving(false);}
   }
   async function cancelUser(event:FormEvent) {
     event.preventDefault();if(!cancelling || !canManage || pending.current)return;
     pending.current=true;setSaving(true);setError("");
     try {const next=cancelDemoUser(records,cancelling.id,actorRole,cancelReason);if(await onChange(next,"USER_DEMO_CANCELLED",cancelling.code)){setCancelling(null);setMessage("ยกเลิกแล้ว เก็บรหัสและประวัติเดิมไว้ ไม่ใช้เลขซ้ำ");}}
-    catch(e){setError(e instanceof Error?e.message:"ยกเลิกไม่สำเร็จ");}
+    catch(e){void report({action:"VALIDATION_REJECTED",module:"settings",outcome:"REJECTED",reason:e instanceof Error?e.message:"ข้อมูลไม่ถูกต้อง"});setError(e instanceof Error?e.message:"ยกเลิกไม่สำเร็จ");}
     finally{pending.current=false;setSaving(false);}
   }
   function open(user?: DemoUser) { setError("");setMessage("");setDraft(user ? {...user} : {...blank(),departmentId:activeDepartments[0]?.id ?? ""}); }
