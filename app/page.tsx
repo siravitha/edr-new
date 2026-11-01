@@ -24,10 +24,10 @@ const nav = [
   { id: "sync", label: "คิวซิงก์และข้อขัดแย้ง", icon: RefreshCw },
   { id: "audit", label: "ประวัติการดำเนินการ", icon: History },
   { id: "integrations", label: "การเชื่อมต่อระบบ", icon: Settings2 },
-  { id: "users", label: "จัดการผู้ใช้งาน", icon: ShieldCheck },
+  { id: "hospital", label: "ข้อมูลโรงพยาบาล", icon: HeartPulse },
   { id: "document-codes", label: "จัดการรหัสคุมเอกสาร", icon: FileText },
   { id: "departments", label: "จัดการแผนก/ฝ่าย", icon: Building2 },
-  { id: "hospital", label: "ข้อมูลโรงพยาบาล", icon: HeartPulse },
+  { id: "users", label: "จัดการผู้ใช้งาน", icon: ShieldCheck },
   { id: "vendors", label: "จัดการผู้ค้ากับโรงพยาบาล", icon: Package }
 ] as const;
 const settingsPages: readonly string[] = ["users", "document-codes", "departments", "hospital", "vendors"];
