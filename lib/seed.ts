@@ -1,3 +1,4 @@
+import type { CatalogProposal } from "../components/asset-catalog-workspace";
 import type { NumberingState } from "./asset-numbering";
 import type { PlanningState } from "./planning";
 import type { DemoUser } from "./users.mjs";
@@ -29,6 +30,8 @@ export type Asset = {
 export type DemoState = {
   planning?: PlanningState;
   assetNumbering?: NumberingState;
+  catalogProposals?: CatalogProposal[];
+  importBatches?: Record<string,any>[];
   assets: Asset[]; receipts: any[]; conflicts: any[]; audit: any[];
   queue: any[]; payments: any[]; documents: any[]; lastSynced: string | null;
   users?: DemoUser[];
