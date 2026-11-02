@@ -17,22 +17,22 @@ enum AssetStatus {
 }
 
 model Plan {
-  id          String @id @default(uuid()) @db.Char(36)
-  hospitalId  String @db.Char(36)
+  id          String @id @default(uuid())
+  hospitalId  String
   fiscalYear  Int
-  title       String @db.VarChar(255)
+  title       String
   approved    Boolean @default(false)
-  budget      Decimal @db.Decimal(18, 2)
+  budget      Decimal
   orders      PurchaseOrder[]
   @@unique([hospitalId, id])
 }
 
 model PurchaseOrder {
-  id          String @id @default(uuid()) @db.Char(36)
-  hospitalId  String @db.Char(36)
-  planId      String @db.Char(36)
-  number      String @db.VarChar(80)
-  status      String @default("DRAFT") @db.VarChar(32)
+  id          String @id @default(uuid())
+  hospitalId  String
+  planId      String
+  number      String
+  status      String @default("DRAFT")
   plan        Plan @relation(fields: [hospitalId, planId], references: [hospitalId, id])
   lines       POLine[]
   claims      PaymentClaim[]
@@ -42,41 +42,41 @@ model PurchaseOrder {
 }
 
 model POLine {
-  id          String @id @default(uuid()) @db.Char(36)
-  hospitalId  String @db.Char(36)
-  poId        String @db.Char(36)
-  description String @db.VarChar(255)
+  id          String @id @default(uuid())
+  hospitalId  String
+  poId        String
+  description String
   quantity    Int
-  unitCost    Decimal @db.Decimal(18, 2)
+  unitCost    Decimal
   po          PurchaseOrder @relation(fields: [hospitalId, poId], references: [hospitalId, id])
   receipts    ReceiptLine[]
   @@unique([hospitalId, id])
 }
 
 model ReceiptLine {
-  id          String @id @default(uuid()) @db.Char(36)
-  hospitalId  String @db.Char(36)
-  poLineId    String @db.Char(36)
-  documentNo  String @db.VarChar(80)
+  id          String @id @default(uuid())
+  hospitalId  String
+  poLineId    String
+  documentNo  String
   acceptedQty Int
-  acceptedAt  DateTime @db.DateTime(3)
-  acceptedBy  String @db.VarChar(191)
+  acceptedAt  DateTime
+  acceptedBy  String
   poLine      POLine @relation(fields: [hospitalId, poLineId], references: [hospitalId, id])
   assets      Asset[]
   @@unique([hospitalId, id])
 }
 
 model Asset {
-  id          String @id @default(uuid()) @db.Char(36)
-  hospitalId  String @db.Char(36)
-  wardId      String @db.Char(36)
-  receiptId   String @db.Char(36)
-  assetNo     String @db.VarChar(80)
-  name        String @db.VarChar(255)
+  id          String @id @default(uuid())
+  hospitalId  String
+  wardId      String
+  receiptId   String
+  assetNo     String
+  name        String
   status      AssetStatus @default(AVAILABLE)
   version     Int @default(0)
   needsReview Boolean @default(false)
-  cost        Decimal @db.Decimal(18, 2)
+  cost        Decimal
   receipt     ReceiptLine @relation(fields: [hospitalId, receiptId], references: [hospitalId, id])
   conflicts   ConflictCase[]
   journals    JournalEntry[]
@@ -86,84 +86,84 @@ model Asset {
 }
 
 model PaymentClaim {
-  id          String @id @default(uuid()) @db.Char(36)
-  hospitalId  String @db.Char(36)
-  poId        String @db.Char(36)
-  claimNo     String @db.VarChar(80)
+  id          String @id @default(uuid())
+  hospitalId  String
+  poId        String
+  claimNo     String
   revision    Int
-  status      String @default("DRAFT") @db.VarChar(32)
-  amount      Decimal @db.Decimal(18, 2)
-  reason      String? @db.VarChar(1000)
+  status      String @default("DRAFT")
+  amount      Decimal
+  reason      String?
   po          PurchaseOrder @relation(fields: [hospitalId, poId], references: [hospitalId, id])
   @@unique([hospitalId, claimNo, revision])
 }
 
 model JournalEntry {
-  id          String @id @default(uuid()) @db.Char(36)
-  hospitalId  String @db.Char(36)
-  assetId     String @db.Char(36)
-  referenceNo String @db.VarChar(80)
-  accountCode String @db.VarChar(32)
-  debit       Decimal @db.Decimal(18, 2)
-  credit      Decimal @db.Decimal(18, 2)
-  postedAt    DateTime @db.DateTime(3)
-  reversalOf  String? @db.Char(36)
+  id          String @id @default(uuid())
+  hospitalId  String
+  assetId     String
+  referenceNo String
+  accountCode String
+  debit       Decimal
+  credit      Decimal
+  postedAt    DateTime
+  reversalOf  String?
   asset       Asset @relation(fields: [hospitalId, assetId], references: [hospitalId, id])
   @@index([hospitalId, assetId])
 }
 
 model WorkflowException {
-  id           String @id @default(uuid()) @db.Char(36)
-  hospitalId   String @db.Char(36)
-  poId         String @db.Char(36)
-  type         String @db.VarChar(64)
-  reason       String @db.VarChar(1000)
-  ownerSubject String @db.VarChar(191)
-  status       String @default("OPEN") @db.VarChar(32)
-  dueAt        DateTime? @db.DateTime(3)
-  createdAt    DateTime @default(now()) @db.DateTime(3)
+  id           String @id @default(uuid())
+  hospitalId   String
+  poId         String
+  type         String
+  reason       String
+  ownerSubject String
+  status       String @default("OPEN")
+  dueAt        DateTime?
+  createdAt    DateTime @default(now())
   po           PurchaseOrder @relation(fields: [hospitalId, poId], references: [hospitalId, id])
   @@index([hospitalId, status, dueAt])
 }
 
 model AuditLog {
-  id           String @id @default(uuid()) @db.Char(36)
-  hospitalId   String @db.Char(36)
-  assetId      String @db.Char(36)
-  actorSubject String @db.VarChar(191)
-  providerRef  String? @db.VarChar(191)
-  deviceId     String @db.Char(36)
-  mutationId   String @db.Char(36)
-  ip           String @db.VarChar(45)
-  eventType    String @db.VarChar(64)
+  id           String @id @default(uuid())
+  hospitalId   String
+  assetId      String
+  actorSubject String
+  providerRef  String?
+  deviceId     String
+  mutationId   String
+  ip           String
+  eventType    String
   detail       Json
-  createdAt    DateTime @default(now()) @db.DateTime(3)
+  createdAt    DateTime @default(now())
   @@index([hospitalId, assetId, createdAt])
 }
 
 model SyncReceipt {
-  id           String @id @default(uuid()) @db.Char(36)
-  hospitalId   String @db.Char(36)
-  deviceId     String @db.Char(36)
-  mutationId   String @db.Char(36)
-  actorSubject String @db.VarChar(191)
-  requestHash  String @db.Char(64)
+  id           String @id @default(uuid())
+  hospitalId   String
+  deviceId     String
+  mutationId   String
+  actorSubject String
+  requestHash  String
   result       Json
-  createdAt    DateTime @default(now()) @db.DateTime(3)
+  createdAt    DateTime @default(now())
   @@unique([hospitalId, deviceId, mutationId])
 }
 
 model ConflictCase {
-  id              String @id @default(uuid()) @db.Char(36)
-  hospitalId      String @db.Char(36)
-  assetId         String @db.Char(36)
+  id              String @id @default(uuid())
+  hospitalId      String
+  assetId         String
   baseVersion     Int
   currentVersion  Int
   proposedStatus  AssetStatus
-  deviceId        String @db.Char(36)
-  mutationId      String @db.Char(36)
-  status          String @default("OPEN") @db.VarChar(24)
-  createdAt       DateTime @default(now()) @db.DateTime(3)
+  deviceId        String
+  mutationId      String
+  status          String @default("OPEN")
+  createdAt       DateTime @default(now())
   asset           Asset @relation(fields: [hospitalId, assetId], references: [hospitalId, id])
   @@index([hospitalId, assetId, status])
 }
