@@ -6,12 +6,12 @@ import { z } from "zod";
 
 const app = Fastify({ logger: { redact: ["req.headers.authorization"] }, bodyLimit: 4096, trustProxy: false });
 const db = new PrismaClient();
-// ระงับคำสั่งจริงจนกว่าจะมีนโยบายอนุมัติและ trusted policy integration ไม่มีทางข้ามผ่าน env
+// เธฃเธฐเธเธฑเธเธเธณเธชเธฑเนเธเธเธฃเธดเธเธเธเธเธงเนเธฒเธเธฐเธกเธตเธเนเธขเธเธฒเธขเธญเธเธธเธกเธฑเธ•เธดเนเธฅเธฐ trusted policy integration เนเธกเนเธกเธตเธ—เธฒเธเธเนเธฒเธกเธเนเธฒเธ env
 const offlinePolicyStatus: string = 'UNSPECIFIED';
 const issuer = process.env.JWT_ISSUER;
 const audience = process.env.JWT_AUDIENCE;
 const pem = process.env.JWT_PUBLIC_KEY_PEM?.replace(/\\n/g, "\n");
-// ขาดการตั้งค่าตัวตนจะไม่เปิดเซิร์ฟเวอร์
+// เธเธฒเธ”เธเธฒเธฃเธ•เธฑเนเธเธเนเธฒเธ•เธฑเธงเธ•เธเธเธฐเนเธกเนเน€เธเธดเธ”เน€เธเธดเธฃเนเธเน€เธงเธญเธฃเน
 if (!issuer || !audience || !pem) throw new Error("JWT configuration required");
 const key = await importSPKI(pem, "RS256");
 
@@ -65,7 +65,7 @@ app.post("/api/sync", async (req, reply) => {
     throw new HttpError(403, "Ward role may only request IN_USE or REPAIR");
   }
   if (offlinePolicyStatus !== 'APPROVED') throw new HttpError(503, 'OFFLINE_POLICY_UNAPPROVED');
-  // สร้างลำดับฟิลด์แน่นอน และไม่ใช้เวลาเครื่องตัดสินข้อขัดแย้ง
+  // เธชเธฃเนเธฒเธเธฅเธณเธ”เธฑเธเธเธดเธฅเธ”เนเนเธเนเธเธญเธ เนเธฅเธฐเนเธกเนเนเธเนเน€เธงเธฅเธฒเน€เธเธฃเธทเนเธญเธเธ•เธฑเธ”เธชเธดเธเธเนเธญเธเธฑเธ”เนเธขเนเธ
   const requestHash = createHash("sha256").update(JSON.stringify([
     cmd.mutationId, cmd.assetId, cmd.baseVersion, cmd.status, cmd.reason,
   ])).digest("hex");
@@ -80,7 +80,7 @@ app.post("/api/sync", async (req, reply) => {
   let result: Prisma.JsonValue;
   try {
     result = await db.$transaction(async tx => {
-      // ล็อกครุภัณฑ์ในโรงพยาบาลที่ระบุในโทเคนเท่านั้น
+      // เธฅเนเธญเธเธเธฃเธธเธ เธฑเธ“เธ‘เนเนเธเนเธฃเธเธเธขเธฒเธเธฒเธฅเธ—เธตเนเธฃเธฐเธเธธเนเธเนเธ—เน€เธเธเน€เธ—เนเธฒเธเธฑเนเธ
       const rows = await tx.$queryRaw<Array<{ id: string; wardId: string; status: AssetStatus; version: number; needsReview: boolean }>>`
         SELECT id, wardId, status, version, needsReview FROM Asset
         WHERE hospitalId = ${claims.hospitalId} AND id = ${cmd.assetId} FOR UPDATE
@@ -112,9 +112,9 @@ app.post("/api/sync", async (req, reply) => {
       } });
       await tx.syncReceipt.create({ data: { ...receiptKey, actorSubject: claims.sub, requestHash, result: response } });
       return response as Prisma.JsonObject;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 3000, timeout: 5000 });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 3000, timeout: 5000 });
   } catch (error) {
-    // คำสั่งซ้ำต่างครุภัณฑ์อาจชน unique key หลังอีกธุรกรรม commit
+    // เธเธณเธชเธฑเนเธเธเนเธณเธ•เนเธฒเธเธเธฃเธธเธ เธฑเธ“เธ‘เนเธญเธฒเธเธเธ unique key เธซเธฅเธฑเธเธญเธตเธเธเธธเธฃเธเธฃเธฃเธก commit
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       const existing = await readExisting(db);
       if (!existing) throw error;
