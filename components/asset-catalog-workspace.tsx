@@ -1,33 +1,60 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { cn, formatCurrency } from "../lib/utils";
 
+type AssetStatus = "AVAILABLE" | "IN_USE" | "REPAIR" | "QUARANTINED" | "DISPOSED";
+
 interface Asset {
   id: string;
-  assetNumber: string;
-  assetName: string;
-  assetCategory: string;
-  department: string;
-  location: string;
-  quantity: number;
-  unitPrice: number;
-  supplier: string;
-  purchaseDate: string;
-  fiscalYear: string;
-  status: string;
-  notes: string;
-  createdAt: string;
+  hospitalId: string;
+  wardId: string;
+  assetNo: string;
+  name: string;
+  status: AssetStatus;
+  version: number;
+  needsReview: boolean;
+  cost: string | number;
 }
 
-const STATUS_OPTIONS = [
-  { value: "", label: "เน€เธโ€”เน€เธเธเน€เธยเน€เธเธเน€เธโ€“เน€เธเธ’เน€เธยเน€เธเธ" },
-  { value: "ACTIVE", label: "เน€เธยเน€เธยเน€เธยเน€เธยเน€เธเธ’เน€เธยเน€เธเธเน€เธเธเน€เธเธเน€เธย" },
-  { value: "RETIRED", label: "เน€เธยเน€เธเธ…เน€เธโ€เน€เธเธเน€เธเธเน€เธเธเน€เธเธ’เน€เธย" },
-  { value: "MAINTENANCE", label: "เน€เธยเน€เธเธ“เน€เธเธ…เน€เธเธ‘เน€เธยเน€เธยเน€เธยเน€เธเธเน€เธเธ" },
+const STATUS_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "All statuses" },
+  { value: "AVAILABLE", label: "Available" },
+  { value: "IN_USE", label: "In use" },
+  { value: "REPAIR", label: "Repair" },
+  { value: "QUARANTINED", label: "Quarantined" },
+  { value: "DISPOSED", label: "Disposed" },
 ];
+
+const WARD_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "All wards" },
+  { value: "W1", label: "Ward 1" },
+  { value: "W2", label: "Ward 2" },
+  { value: "W3", label: "Ward 3" },
+  { value: "W4", label: "Ward 4" },
+  { value: "W5", label: "Ward 5" },
+];
+
+const HOSPITAL_ID = "H1";
+const PAGE_SIZE = 10;
+
+const statusStyles: Record<AssetStatus, string> = {
+  AVAILABLE: "bg-green-100 text-green-700",
+  IN_USE: "bg-blue-100 text-blue-700",
+  REPAIR: "bg-yellow-100 text-yellow-700",
+  QUARANTINED: "bg-orange-100 text-orange-700",
+  DISPOSED: "bg-gray-100 text-gray-600",
+};
+
+const statusLabels: Record<AssetStatus, string> = {
+  AVAILABLE: "Available",
+  IN_USE: "In use",
+  REPAIR: "Repair",
+  QUARANTINED: "Quarantined",
+  DISPOSED: "Disposed",
+};
 
 export function AssetCatalogWorkspace() {
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -37,6 +64,7 @@ export function AssetCatalogWorkspace() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [wardFilter, setWardFilter] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Asset | null>(null);
   const [error, setError] = useState("");
@@ -45,21 +73,23 @@ export function AssetCatalogWorkspace() {
 
   const fetchAssets = useCallback(async () => {
     setLoading(true);
+    setError("");
     try {
-      const params = new URLSearchParams({ page: String(page), pageSize: "10" });
+      const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
       if (search) params.set("search", search);
       if (statusFilter) params.set("status", statusFilter);
-      const res = await fetch(`/api/assets?${params}`);
+      if (wardFilter) params.set("wardId", wardFilter);
+      const res = await fetch(`/api/assets?${params.toString()}`);
       const data = await res.json();
-      setAssets(data.assets);
-      setTotal(data.total);
-      setTotalPages(data.totalPages);
+      setAssets(data.assets || []);
+      setTotal(data.total || 0);
+      setTotalPages(data.totalPages || 1);
     } catch {
-      setError("เน€เธยเน€เธเธเน€เธเธ…เน€เธโ€เน€เธยเน€เธยเน€เธเธเน€เธเธเน€เธเธเน€เธเธ…เน€เธยเน€เธเธเน€เธยเน€เธยเน€เธโ€เน€เธย");
+      setError("Failed to load assets. Is the API running?");
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusFilter]);
+  }, [page, search, statusFilter, wardFilter]);
 
   useEffect(() => {
     const t = setTimeout(() => fetchAssets(), 300);
@@ -71,38 +101,44 @@ export function AssetCatalogWorkspace() {
     const form = new FormData(e.currentTarget);
     const payload: Record<string, unknown> = {};
     form.forEach((val, key) => { payload[key] = val; });
-    if (payload.quantity) payload.quantity = Number(payload.quantity);
-    if (payload.unitPrice) payload.unitPrice = Number(payload.unitPrice);
+    if (payload.cost !== undefined && payload.cost !== "") payload.cost = Number(payload.cost);
     setError(""); setSuccess(""); setSaving(true);
-
     try {
       const res = editing
-        ? await fetch(`/api/assets/${editing.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
-        : await fetch("/api/assets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-
+        ? await fetch(`/api/assets/${editing.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+        : await fetch("/api/assets", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...payload, hospitalId: HOSPITAL_ID }),
+          });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Failed (${res.status})`);
+        throw new Error(data.error || `Request failed (${res.status})`);
       }
-      setSuccess(editing ? "เน€เธเธเน€เธเธ‘เน€เธยเน€เธโฌเน€เธโ€เน€เธโ€ขเน€เธเธเน€เธเธ”เน€เธยเน€เธโ€”เน€เธเธเน€เธเธ‘เน€เธยเน€เธเธเน€เธยเน€เธยเน€เธเธ…เน€เธยเน€เธเธ" : "เน€เธเธเน€เธเธเน€เธยเน€เธเธ’เน€เธยเน€เธเธเน€เธเธ”เน€เธยเน€เธโ€”เน€เธเธเน€เธเธ‘เน€เธยเน€เธเธเน€เธยเน€เธเธเน€เธเธ“เน€เธโฌเน€เธเธเน€เธยเน€เธย");
-      setShowForm(false); setEditing(null);
+      setSuccess(editing ? "Asset updated successfully" : "Asset created successfully");
+      setShowForm(false);
+      setEditing(null);
       fetchAssets();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "เน€เธโฌเน€เธยเน€เธเธ”เน€เธโ€เน€เธยเน€เธยเน€เธเธเน€เธยเน€เธเธ”เน€เธโ€เน€เธยเน€เธเธ…เน€เธเธ’เน€เธโ€");
+      setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!window.confirm(`เน€เธเธ…เน€เธยเน€เธเธเน€เธเธ”เน€เธยเน€เธโ€”เน€เธเธเน€เธเธ‘เน€เธยเน€เธเธเน€เธย "${name}" ?`)) return;
+    if (!window.confirm(`Delete "${name}"?`)) return;
     try {
       const res = await fetch(`/api/assets/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("เน€เธเธ…เน€เธยเน€เธยเน€เธเธเน€เธยเน€เธยเน€เธโ€เน€เธย");
-      setSuccess("เน€เธเธ…เน€เธยเน€เธเธเน€เธเธ”เน€เธยเน€เธโ€”เน€เธเธเน€เธเธ‘เน€เธยเน€เธเธเน€เธยเน€เธยเน€เธเธ…เน€เธยเน€เธเธ");
+      if (!res.ok) throw new Error("Failed to delete");
+      setSuccess("Asset deleted");
       fetchAssets();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "เน€เธเธ…เน€เธยเน€เธยเน€เธเธเน€เธยเน€เธยเน€เธโ€เน€เธย");
+      setError(err instanceof Error ? err.message : "Failed to delete");
     }
   };
 
@@ -110,20 +146,23 @@ export function AssetCatalogWorkspace() {
   const handleNew = () => { setEditing(null); setShowForm(true); setError(""); setSuccess(""); };
   const closeForm = () => { setShowForm(false); setEditing(null); };
 
-  const statusBadge = (s: string) => {
-    const map: Record<string, string> = { ACTIVE: "bg-green-100 text-green-700", RETIRED: "bg-gray-100 text-gray-600", MAINTENANCE: "bg-yellow-100 text-yellow-700" };
-    const label: Record<string, string> = { ACTIVE: "เน€เธยเน€เธยเน€เธยเน€เธยเน€เธเธ’เน€เธย", RETIRED: "เน€เธยเน€เธเธ…เน€เธโ€เน€เธเธเน€เธเธเน€เธเธเน€เธเธ’เน€เธย", MAINTENANCE: "เน€เธยเน€เธยเน€เธเธเน€เธเธ" };
-    return <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", map[s] || "bg-blue-100 text-blue-700")}>{label[s] || s}</span>;
-  };
+  const statusBadge = (s: AssetStatus) => (
+    <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", statusStyles[s] || "bg-blue-100 text-blue-700")}>
+      {statusLabels[s] || s}
+    </span>
+  );
+
+  const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const to = Math.min(total, page * PAGE_SIZE);
 
   return (
     <div className="space-y-6 p-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">เน€เธโ€”เน€เธเธเน€เธโฌเน€เธยเน€เธเธ•เน€เธเธเน€เธยเน€เธเธเน€เธเธ”เน€เธยเน€เธโ€”เน€เธเธเน€เธเธ‘เน€เธยเน€เธเธเน€เธย</h1>
-          <p className="text-sm text-muted-foreground mt-1">เน€เธยเน€เธเธ‘เน€เธโ€เน€เธยเน€เธเธ’เน€เธเธเน€เธเธเน€เธเธ”เน€เธยเน€เธโ€”เน€เธเธเน€เธเธ‘เน€เธยเน€เธเธเน€เธย เนโฌโ€ เน€เธโฌเน€เธยเน€เธเธ”เน€เธยเน€เธเธ / เน€เธยเน€เธยเน€เธยเน€เธยเน€เธย / เน€เธเธ…เน€เธย / เน€เธยเน€เธยเน€เธยเน€เธเธเน€เธเธ’</p>
+          <h1 className="text-2xl font-bold tracking-tight">Asset Catalog</h1>
+          <p className="text-sm text-muted-foreground mt-1">Search, filter, and manage hospital assets</p>
         </div>
-        <Button onClick={handleNew}>+ เน€เธโฌเน€เธยเน€เธเธ”เน€เธยเน€เธเธเน€เธเธเน€เธเธ”เน€เธยเน€เธโ€”เน€เธเธเน€เธเธ‘เน€เธยเน€เธเธเน€เธย</Button>
+        <Button onClick={handleNew}>+ New Asset</Button>
       </div>
 
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
@@ -131,26 +170,42 @@ export function AssetCatalogWorkspace() {
 
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3 pt-6">
-          <input type="search" placeholder="เน€เธยเน€เธยเน€เธยเน€เธเธเน€เธเธ’ เน€เธเธเน€เธเธเน€เธเธ’เน€เธเธเน€เธโฌเน€เธเธ…เน€เธย / เน€เธยเน€เธเธ—เน€เธยเน€เธเธ / เน€เธยเน€เธยเน€เธยเน€เธย / เน€เธเธเน€เธโ€“เน€เธเธ’เน€เธยเน€เธโ€”เน€เธเธ•เน€เธย..." value={search}
+          <input
+            type="search"
+            placeholder="Search asset code or name..."
+            value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            className="h-9 flex-1 min-w-[200px] rounded-md border px-3 text-sm bg-background" />
-          <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-            className="h-9 rounded-md border px-3 text-sm bg-background">
+            className="h-9 flex-1 min-w-[220px] rounded-md border px-3 text-sm bg-background"
+          />
+          <select
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+            className="h-9 rounded-md border px-3 text-sm bg-background"
+          >
             {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
-          <span className="text-sm text-muted-foreground whitespace-nowrap">{total} เน€เธเธเน€เธเธ’เน€เธเธเน€เธยเน€เธเธ’เน€เธเธ</span>
+          <select
+            value={wardFilter}
+            onChange={(e) => { setWardFilter(e.target.value); setPage(1); }}
+            className="h-9 rounded-md border px-3 text-sm bg-background"
+          >
+            {WARD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <span className="text-sm text-muted-foreground whitespace-nowrap">{total} items</span>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader className="pb-3"><CardTitle>เน€เธเธเน€เธเธ’เน€เธเธเน€เธยเน€เธเธ’เน€เธเธเน€เธเธเน€เธเธ”เน€เธยเน€เธโ€”เน€เธเธเน€เธเธ‘เน€เธยเน€เธเธเน€เธย</CardTitle></CardHeader>
+        <CardHeader className="pb-3">
+          <CardTitle>Assets</CardTitle>
+        </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex h-48 items-center justify-center text-muted-foreground">เน€เธยเน€เธเธ“เน€เธเธ…เน€เธเธ‘เน€เธยเน€เธยเน€เธเธเน€เธเธ…เน€เธโ€...</div>
+            <div className="flex h-48 items-center justify-center text-muted-foreground">Loading...</div>
           ) : assets.length === 0 ? (
             <div className="flex h-48 flex-col items-center justify-center gap-3 text-muted-foreground">
-              <p>เน€เธเธเน€เธเธ‘เน€เธยเน€เธยเน€เธเธเน€เธยเน€เธเธเน€เธเธ•เน€เธยเน€เธยเน€เธเธเน€เธเธเน€เธเธเน€เธเธ…</p>
-              <Button variant="secondary" onClick={handleNew}>เน€เธโฌเน€เธยเน€เธเธ”เน€เธยเน€เธเธเน€เธเธเน€เธเธ”เน€เธยเน€เธโ€”เน€เธเธเน€เธเธ‘เน€เธยเน€เธเธเน€เธยเน€เธยเน€เธเธเน€เธย</Button>
+              <p>No assets found</p>
+              <Button variant="secondary" onClick={handleNew}>Create first asset</Button>
             </div>
           ) : (
             <>
@@ -158,30 +213,28 @@ export function AssetCatalogWorkspace() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left text-muted-foreground">
-                      <th className="px-3 py-2 font-medium">เน€เธเธเน€เธเธเน€เธเธ’เน€เธเธเน€เธโฌเน€เธเธ…เน€เธย</th>
-                      <th className="px-3 py-2 font-medium">เน€เธยเน€เธเธ—เน€เธยเน€เธเธ</th>
-                      <th className="px-3 py-2 font-medium">เน€เธยเน€เธยเน€เธยเน€เธย</th>
-                      <th className="px-3 py-2 font-medium">เน€เธเธเน€เธโ€“เน€เธเธ’เน€เธยเน€เธโ€”เน€เธเธ•เน€เธย</th>
-                      <th className="px-3 py-2 font-medium text-right">เน€เธเธเน€เธเธ’เน€เธยเน€เธเธ’</th>
-                      <th className="px-3 py-2 font-medium">เน€เธเธเน€เธโ€“เน€เธเธ’เน€เธยเน€เธเธ</th>
-                      <th className="px-3 py-2 font-medium">เน€เธยเน€เธเธ•เน€เธยเน€เธย</th>
-                      <th className="px-3 py-2 font-medium text-right">เน€เธยเน€เธเธ‘เน€เธโ€เน€เธยเน€เธเธ’เน€เธเธ</th>
+                      <th className="px-3 py-2 font-medium">Asset No</th>
+                      <th className="px-3 py-2 font-medium">Name</th>
+                      <th className="px-3 py-2 font-medium">Ward</th>
+                      <th className="px-3 py-2 font-medium text-right">Cost</th>
+                      <th className="px-3 py-2 font-medium">Status</th>
+                      <th className="px-3 py-2 font-medium">Version</th>
+                      <th className="px-3 py-2 font-medium text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {assets.map(asset => (
+                    {assets.map((asset) => (
                       <tr key={asset.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                        <td className="px-3 py-2 font-mono text-xs">{asset.assetNumber}</td>
-                        <td className="px-3 py-2 font-medium">{asset.assetName}</td>
-                        <td className="px-3 py-2">{asset.department || "เนโฌโ€"}</td>
-                        <td className="px-3 py-2">{asset.location || "เนโฌโ€"}</td>
-                        <td className="px-3 py-2 text-right">{formatCurrency(asset.unitPrice)}</td>
+                        <td className="px-3 py-2 font-mono text-xs">{asset.assetNo}</td>
+                        <td className="px-3 py-2 font-medium">{asset.name}</td>
+                        <td className="px-3 py-2">{asset.wardId || "-"}</td>
+                        <td className="px-3 py-2 text-right">{formatCurrency(Number(asset.cost) || 0)}</td>
                         <td className="px-3 py-2">{statusBadge(asset.status)}</td>
-                        <td className="px-3 py-2">{asset.fiscalYear}</td>
+                        <td className="px-3 py-2 text-center text-xs text-muted-foreground">v{asset.version}</td>
                         <td className="px-3 py-2">
                           <div className="flex gap-1 justify-end">
-                            <Button variant="ghost" size="sm" onClick={() => handleEdit(asset)}>เน€เธยเน€เธยเน€เธยเน€เธยเน€เธย</Button>
-                            <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700" onClick={() => handleDelete(asset.id, asset.assetName)}>เน€เธเธ…เน€เธย</Button>
+                            <Button variant="ghost" size="sm" onClick={() => handleEdit(asset)}>Edit</Button>
+                            <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700" onClick={() => handleDelete(asset.id, asset.name)}>Del</Button>
                           </div>
                         </td>
                       </tr>
@@ -189,13 +242,22 @@ export function AssetCatalogWorkspace() {
                   </tbody>
                 </table>
               </div>
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between pt-4">
-                  <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>เนยย เน€เธยเน€เธยเน€เธเธเน€เธยเน€เธเธเน€เธยเน€เธยเน€เธเธ’</Button>
-                  <span className="text-sm text-muted-foreground">เน€เธเธเน€เธยเน€เธยเน€เธเธ’ {page} / {totalPages}</span>
-                  <Button variant="secondary" size="sm" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>เน€เธโ€“เน€เธเธ‘เน€เธโ€เน€เธยเน€เธย เนยโ€</Button>
+              <div className="flex items-center justify-between pt-4">
+                <span className="text-sm text-muted-foreground">
+                  Showing {from}&ndash;{to} of {total}
+                </span>
+                <div className="flex gap-2">
+                  <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+                    &larr; Prev
+                  </Button>
+                  <span className="flex items-center text-sm text-muted-foreground">
+                    Page {page} / {totalPages}
+                  </span>
+                  <Button variant="secondary" size="sm" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+                    Next &rarr;
+                  </Button>
                 </div>
-              )}
+              </div>
             </>
           )}
         </CardContent>
@@ -203,85 +265,47 @@ export function AssetCatalogWorkspace() {
 
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={closeForm}>
-          <div className="w-full max-w-lg rounded-xl bg-background p-6 shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <h2 className="mb-4 text-lg font-bold">{editing ? "เน€เธยเน€เธยเน€เธยเน€เธยเน€เธยเน€เธเธเน€เธเธ”เน€เธยเน€เธโ€”เน€เธเธเน€เธเธ‘เน€เธยเน€เธเธเน€เธย" : "เน€เธโฌเน€เธยเน€เธเธ”เน€เธยเน€เธเธเน€เธเธเน€เธเธ”เน€เธยเน€เธโ€”เน€เธเธเน€เธเธ‘เน€เธยเน€เธเธเน€เธย"}</h2>
+          <div className="w-full max-w-lg rounded-xl bg-background p-6 shadow-xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <h2 className="mb-4 text-lg font-bold">{editing ? "Edit Asset" : "New Asset"}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="text-sm font-medium mb-1 block">เน€เธเธเน€เธเธเน€เธเธ’เน€เธเธเน€เธโฌเน€เธเธ…เน€เธย * <span className="text-red-500">*</span></label>
-                  <input name="assetNumber" required defaultValue={editing?.assetNumber} placeholder="AST-2569-0001"
-                    className="w-full h-9 rounded-md border px-3 text-sm" />
+                  <label className="text-sm font-medium mb-1 block">Asset Code <span className="text-red-500">*</span></label>
+                  <input name="assetNo" required defaultValue={editing?.assetNo} disabled={!!editing} placeholder="AST-2569-0001"
+                    className="w-full h-9 rounded-md border px-3 text-sm disabled:opacity-50" />
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-1 block">เน€เธยเน€เธเธ—เน€เธยเน€เธเธเน€เธเธเน€เธเธ”เน€เธยเน€เธโ€”เน€เธเธเน€เธเธ‘เน€เธยเน€เธเธเน€เธย *</label>
-                  <input name="assetName" required defaultValue={editing?.assetName} placeholder="เน€เธโฌเน€เธยเน€เธเธเน€เธเธ—เน€เธยเน€เธเธเน€เธยเน€เธยเน€เธเธเน€เธเธ‘เน€เธยเน€เธเธเน€เธเธ’เน€เธยเน€เธเธ’เน€เธเธ 18,000 BTU"
+                  <label className="text-sm font-medium mb-1 block">Name <span className="text-red-500">*</span></label>
+                  <input name="name" required defaultValue={editing?.name} placeholder="Air Conditioner 18,000 BTU"
                     className="w-full h-9 rounded-md border px-3 text-sm" />
                 </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="text-sm font-medium mb-1 block">เน€เธยเน€เธเธเน€เธเธเน€เธโฌเน€เธย เน€เธโ€”</label>
-                  <input name="assetCategory" defaultValue={editing?.assetCategory} placeholder="เน€เธยเน€เธเธเน€เธเธเน€เธย เน€เธเธ‘เน€เธโ€เน€เธโ€เน€เธย / เน€เธโฌเน€เธยเน€เธเธเน€เธเธ—เน€เธยเน€เธเธเน€เธยเน€เธเธเน€เธเธ—เน€เธเธเน€เธยเน€เธยเน€เธโ€”เน€เธเธเน€เธย"
-                    className="w-full h-9 rounded-md border px-3 text-sm" />
+                  <label className="text-sm font-medium mb-1 block">Ward</label>
+                  <select name="wardId" defaultValue={editing?.wardId || ""}
+                    className="w-full h-9 rounded-md border px-3 text-sm bg-background">
+                    {WARD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-1 block">เน€เธยเน€เธยเน€เธยเน€เธย</label>
-                  <input name="department" defaultValue={editing?.department} placeholder="เน€เธเธเน€เธเธเน€เธเธเน€เธยเน€เธโ€ 5 เน€เธยเน€เธเธ‘เน€เธยเน€เธย 3"
-                    className="w-full h-9 rounded-md border px-3 text-sm" />
+                  <label className="text-sm font-medium mb-1 block">Status</label>
+                  <select name="status" defaultValue={editing?.status || "AVAILABLE"}
+                    className="w-full h-9 rounded-md border px-3 text-sm bg-background">
+                    {STATUS_OPTIONS.filter(o => o.value !== "").map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
                 </div>
               </div>
               <div>
-                <label className="text-sm font-medium mb-1 block">เน€เธเธเน€เธโ€“เน€เธเธ’เน€เธยเน€เธโ€”เน€เธเธ•เน€เธยเน€เธโ€ขเน€เธเธ”เน€เธโ€เน€เธโ€ขเน€เธเธ‘เน€เธยเน€เธย</label>
-                <input name="location" defaultValue={editing?.location} placeholder="เน€เธเธเน€เธเธ’เน€เธยเน€เธเธ’เน€เธเธเน€เธยเน€เธเธเน€เธยเน€เธยเน€เธยเน€เธเธเน€เธเธ เน€เธยเน€เธเธ‘เน€เธยเน€เธย 5 เน€เธเธเน€เธยเน€เธเธเน€เธย 502"
-                  className="w-full h-9 rounded-md border px-3 text-sm" />
-              </div>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <div>
-                  <label className="text-sm font-medium mb-1 block">เน€เธยเน€เธเธ“เน€เธยเน€เธเธเน€เธย</label>
-                  <input name="quantity" type="number" min="1" defaultValue={editing?.quantity ?? 1}
-                    className="w-full h-9 rounded-md border px-3 text-sm" />
-                </div>
-                <div>
-                  <label className="text-sm font-medium mb-1 block">เน€เธเธเน€เธเธ’เน€เธยเน€เธเธ’เน€เธโ€ขเน€เธยเน€เธเธเน€เธเธเน€เธยเน€เธยเน€เธเธเน€เธเธ</label>
-                  <input name="unitPrice" type="number" min="0" step="0.01" defaultValue={editing?.unitPrice ?? 0}
-                    className="w-full h-9 rounded-md border px-3 text-sm" />
-                </div>
-                <div>
-                  <label className="text-sm font-medium mb-1 block">เน€เธยเน€เธเธ•เน€เธยเน€เธยเน€เธยเน€เธเธเน€เธเธเน€เธเธเน€เธเธ’เน€เธโ€</label>
-                  <input name="fiscalYear" defaultValue={editing?.fiscalYear || "2569"} placeholder="2569"
-                    className="w-full h-9 rounded-md border px-3 text-sm" />
-                </div>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="text-sm font-medium mb-1 block">เน€เธยเน€เธเธเน€เธยเน€เธยเน€เธเธ’เน€เธเธ</label>
-                  <input name="supplier" defaultValue={editing?.supplier} placeholder="เน€เธยเน€เธเธเน€เธเธ”เน€เธเธเน€เธเธ‘เน€เธโ€” ..."
-                    className="w-full h-9 rounded-md border px-3 text-sm" />
-                </div>
-                <div>
-                  <label className="text-sm font-medium mb-1 block">เน€เธเธเน€เธเธ‘เน€เธยเน€เธโ€”เน€เธเธ•เน€เธยเน€เธยเน€เธเธ—เน€เธยเน€เธเธ</label>
-                  <input name="purchaseDate" type="date" defaultValue={editing ? editing.purchaseDate?.substring(0, 10) : ""}
-                    className="w-full h-9 rounded-md border px-3 text-sm" />
-                </div>
-              </div>
-              <div>
-                <label className="text-sm font-medium mb-1 block">เน€เธเธเน€เธโ€“เน€เธเธ’เน€เธยเน€เธเธ</label>
-                <select name="status" defaultValue={editing?.status || "ACTIVE"} className="w-full h-9 rounded-md border px-3 text-sm bg-background">
-                  <option value="ACTIVE">เน€เธยเน€เธยเน€เธยเน€เธยเน€เธเธ’เน€เธยเน€เธเธเน€เธเธเน€เธเธเน€เธย</option>
-                  <option value="MAINTENANCE">เน€เธยเน€เธเธ“เน€เธเธ…เน€เธเธ‘เน€เธยเน€เธยเน€เธยเน€เธเธเน€เธเธ</option>
-                  <option value="RETIRED">เน€เธยเน€เธเธ…เน€เธโ€เน€เธเธเน€เธเธเน€เธเธเน€เธเธ’เน€เธย</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-sm font-medium mb-1 block">เน€เธเธเน€เธเธเน€เธเธ’เน€เธเธเน€เธโฌเน€เธเธเน€เธโ€ขเน€เธเธ</label>
-                <textarea name="notes" rows={2} defaultValue={editing?.notes} placeholder="เน€เธเธเน€เธเธ’เน€เธเธเน€เธเธ…เน€เธเธเน€เธโฌเน€เธเธเน€เธเธ•เน€เธเธเน€เธโ€เน€เธโฌเน€เธยเน€เธเธ”เน€เธยเน€เธเธเน€เธโฌเน€เธโ€ขเน€เธเธ”เน€เธเธ..."
-                  className="w-full rounded-md border px-3 text-sm" />
+                <label className="text-sm font-medium mb-1 block">Cost (THB)</label>
+                <input name="cost" type="number" min="0" step="0.01" defaultValue={editing ? Number(editing.cost) : ""}
+                  placeholder="45000" className="w-full h-9 rounded-md border px-3 text-sm" />
               </div>
               <div className="flex gap-3 pt-2">
                 <Button type="submit" disabled={saving} className="flex-1">
-                  {saving ? "เน€เธยเน€เธเธ“เน€เธเธ…เน€เธเธ‘เน€เธยเน€เธยเน€เธเธ‘เน€เธยเน€เธโ€”เน€เธเธ–เน€เธย..." : editing ? "เน€เธยเน€เธเธ‘เน€เธยเน€เธโ€”เน€เธเธ–เน€เธยเน€เธยเน€เธเธ’เน€เธเธเน€เธยเน€เธยเน€เธยเน€เธยเน€เธย" : "เน€เธเธเน€เธเธเน€เธยเน€เธเธ’เน€เธยเน€เธเธเน€เธเธ”เน€เธยเน€เธโ€”เน€เธเธเน€เธเธ‘เน€เธยเน€เธเธเน€เธย"}
+                  {saving ? "Saving..." : editing ? "Save Changes" : "Create Asset"}
                 </Button>
-                <Button type="button" variant="secondary" onClick={closeForm}>เน€เธเธเน€เธยเน€เธโฌเน€เธเธ…เน€เธเธ”เน€เธย</Button>
+                <Button type="button" variant="secondary" onClick={closeForm}>Cancel</Button>
               </div>
             </form>
           </div>
@@ -299,3 +323,5 @@ export interface CatalogProposal {
   status: "pending" | "approved" | "rejected";
   createdAt: string;
 }
+
+export default AssetCatalogWorkspace;
