@@ -5,7 +5,9 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev.db"
+  // dev.db จริงอยู่ที่ /home/admin/Working/edr-new/prisma/dev.db (SQLite)
+  // URL ต้องเป็น absolute path เพราะ client ถูก generate ไว้ใน backend/node_modules
+  url      = "file:///home/admin/Working/edr-new/prisma/dev.db"
 }
 
 enum AssetStatus {
@@ -14,6 +16,13 @@ enum AssetStatus {
   REPAIR
   QUARANTINED
   DISPOSED
+}
+
+enum UserRole {
+  ADMIN
+  WAREHOUSE
+  WARD
+  AUDITOR
 }
 
 model Plan {
@@ -151,6 +160,41 @@ model SyncReceipt {
   result       Json
   createdAt    DateTime @default(now())
   @@unique([hospitalId, deviceId, mutationId])
+}
+
+model User {
+  id           String     @id @default(uuid())
+  hospitalId   String
+  staffCode    String
+  fullName     String
+  role         UserRole
+  passwordHash String
+  active       Boolean    @default(true)
+  wards        UserWard[]
+  loginLogs    UserLoginLog[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  @@unique([hospitalId, staffCode])
+  @@index([hospitalId, active])
+}
+
+model UserWard {
+  userId String
+  wardId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([userId, wardId])
+  @@index([userId])
+}
+
+model UserLoginLog {
+  id           String   @id @default(uuid())
+  userId       String
+  ip           String
+  success      Boolean
+  failReason   String?
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, createdAt])
 }
 
 model ConflictCase {

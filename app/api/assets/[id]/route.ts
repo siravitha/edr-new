@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../../../lib/prisma";
 
 interface Params { params: Promise<{ id: string }> }
@@ -23,7 +24,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     data: {
       name: name ?? existing.name,
       status: status ?? existing.status,
-      cost: cost !== undefined ? new prisma.Decimal(cost) : existing.cost,
+      cost: cost !== undefined ? new Prisma.Decimal(cost) : existing.cost,
       wardId: wardId ?? existing.wardId,
       needsReview: needsReview ?? existing.needsReview,
       version: existing.version + 1,

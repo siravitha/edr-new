@@ -1,31 +1,16 @@
 import Fastify from "fastify";
-import { importSPKI, jwtVerify } from "jose";
 import { createHash } from "node:crypto";
 import { Prisma, PrismaClient, AssetStatus } from "@prisma/client";
 import { z } from "zod";
+import { loadJwtConfig, verifyAccessToken, type AccessClaims } from "./auth.js";
+import { authRoutes } from "./routes/auth.js";
 
 const app = Fastify({ logger: { redact: ["req.headers.authorization"] }, bodyLimit: 4096, trustProxy: false });
 const db = new PrismaClient();
 // เธฃเธฐเธเธฑเธเธเธณเธชเธฑเนเธเธเธฃเธดเธเธเธเธเธงเนเธฒเธเธฐเธกเธตเธเนเธขเธเธฒเธขเธญเธเธธเธกเธฑเธ•เธดเนเธฅเธฐ trusted policy integration เนเธกเนเธกเธตเธ—เธฒเธเธเนเธฒเธกเธเนเธฒเธ env
 const offlinePolicyStatus: string = 'UNSPECIFIED';
-const issuer = process.env.JWT_ISSUER;
-const audience = process.env.JWT_AUDIENCE;
-const pem = process.env.JWT_PUBLIC_KEY_PEM?.replace(/\\n/g, "\n");
+const jwtConfig = loadJwtConfig();
 // เธเธฒเธ”เธเธฒเธฃเธ•เธฑเนเธเธเนเธฒเธ•เธฑเธงเธ•เธเธเธฐเนเธกเนเน€เธเธดเธ”เน€เธเธดเธฃเนเธเน€เธงเธญเธฃเน
-if (!issuer || !audience || !pem) throw new Error("JWT configuration required");
-const key = await importSPKI(pem, "RS256");
-
-const claimsSchema = z.object({
-  sub: z.string().min(1).max(191),
-  hospitalId: z.uuid(),
-  deviceId: z.uuid(),
-  roles: z.array(z.enum(["WAREHOUSE", "WARD", "AUDITOR", "ADMIN"])).max(20),
-  wards: z.array(z.uuid()).max(500),
-  providerRef: z.string().min(1).max(191).optional(),
-  exp: z.number().int(),
-  iat: z.number().int(),
-  token_use: z.literal("access"),
-});
 const commandSchema = z.object({
   mutationId: z.uuid(),
   assetId: z.uuid(),
@@ -45,15 +30,14 @@ const transitions: Record<AssetStatus, readonly AssetStatus[]> = {
 };
 
 app.get("/api/health", async () => ({ status: "ok", integration: "not-configured" }));
+// Login + RBAC routes (login endpoint; user seeding only when ALLOW_USER_SEEDING=true)
+app.register(authRoutes, { db, config: jwtConfig, allowUserSeeding: process.env.ALLOW_USER_SEEDING === "true" });
 app.post("/api/sync", async (req, reply) => {
   const authorization = req.headers.authorization;
   if (!authorization?.startsWith("Bearer ")) throw new HttpError(401, "Authentication required");
-  let claims: z.infer<typeof claimsSchema>;
+  let claims: AccessClaims;
   try {
-    const { payload } = await jwtVerify(authorization.slice(7), key, {
-      issuer, audience, algorithms: ["RS256"], maxTokenAge: "15m", clockTolerance: 5,
-    });
-    claims = claimsSchema.parse(payload);
+    claims = verifyAccessToken(authorization.slice(7), jwtConfig);
   } catch { throw new HttpError(401, "Invalid access token"); }
   if (!claims.roles.some(r => r === "WAREHOUSE" || r === "WARD")) {
     throw new HttpError(403, "Operational role required");

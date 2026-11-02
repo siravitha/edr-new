@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { cn, formatCurrency } from "../lib/utils";
+import { downloadAssetPdf } from "../lib/pdf-report";
 
 type AssetStatus = "AVAILABLE" | "IN_USE" | "REPAIR" | "QUARANTINED" | "DISPOSED";
 
@@ -56,7 +57,14 @@ const statusLabels: Record<AssetStatus, string> = {
   DISPOSED: "Disposed",
 };
 
-export function AssetCatalogWorkspace() {
+export interface AssetCatalogWorkspaceProps {
+  role?: string;
+  editable?: boolean;
+  proposals?: unknown[];
+  onPropose?: (proposal: CatalogProposal) => Promise<boolean> | boolean | void;
+}
+
+export function AssetCatalogWorkspace(_props: AssetCatalogWorkspaceProps = {}) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -70,6 +78,7 @@ export function AssetCatalogWorkspace() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const fetchAssets = useCallback(async () => {
     setLoading(true);
@@ -142,6 +151,19 @@ export function AssetCatalogWorkspace() {
     }
   };
 
+  const handleExportPdf = async () => {
+    setExporting(true);
+    setError("");
+    try {
+      await downloadAssetPdf({ search, status: statusFilter, wardId: wardFilter, hospitalId: HOSPITAL_ID });
+      setSuccess("PDF report exported");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to export PDF");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const handleEdit = (asset: Asset) => { setEditing(asset); setShowForm(true); setError(""); setSuccess(""); };
   const handleNew = () => { setEditing(null); setShowForm(true); setError(""); setSuccess(""); };
   const closeForm = () => { setShowForm(false); setEditing(null); };
@@ -162,7 +184,12 @@ export function AssetCatalogWorkspace() {
           <h1 className="text-2xl font-bold tracking-tight">Asset Catalog</h1>
           <p className="text-sm text-muted-foreground mt-1">Search, filter, and manage hospital assets</p>
         </div>
-        <Button onClick={handleNew}>+ New Asset</Button>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={handleExportPdf} disabled={exporting}>
+            {exporting ? "Exporting..." : "Export PDF"}
+          </Button>
+          <Button onClick={handleNew}>+ New Asset</Button>
+        </div>
       </div>
 
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
@@ -316,12 +343,8 @@ export function AssetCatalogWorkspace() {
 }
 
 export interface CatalogProposal {
-  id: string;
-  name: string;
-  category: string;
-  proposedBy: string;
-  status: "pending" | "approved" | "rejected";
-  createdAt: string;
+    catalogId: string;
+    createdAt: string;
 }
 
 export default AssetCatalogWorkspace;

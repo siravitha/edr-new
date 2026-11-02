@@ -1,8 +1,13 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 
 const root = resolve('out');
+if (!existsSync(root)) {
+  console.warn(`[prepare-offline] 'out/' directory not found — skipping offline bundle (static export not enabled).`);
+  process.exit(0);
+}
 async function walk(dir, prefix = '') {
   const entries = await readdir(dir, { withFileTypes: true });
   const paths = [];
