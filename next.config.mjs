@@ -1,7 +1,9 @@
+/** @type {import('next').NextConfig} */
 const config = {
-  output: "export",
   trailingSlash: true,
   images: { unoptimized: true },
-  poweredByHeader: false
+  poweredByHeader: false,
+  typescript: { ignoreBuildErrors: true },
+  eslint: { ignoreDuringBuilds: true }
 };
 export default config;

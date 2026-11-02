@@ -1,6 +1,6 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../backend/node_modules/.prisma/client"
+  output   = "../node_modules/.prisma/client"
 }
 
 datasource db {
@@ -70,14 +70,14 @@ model Asset {
   id          String @id @default(uuid())
   hospitalId  String
   wardId      String
-  receiptId   String
+  receiptId   String?
   assetNo     String
   name        String
   status      AssetStatus @default(AVAILABLE)
   version     Int @default(0)
   needsReview Boolean @default(false)
   cost        Decimal
-  receipt     ReceiptLine @relation(fields: [hospitalId, receiptId], references: [hospitalId, id])
+  receipt     ReceiptLine? @relation(fields: [hospitalId, receiptId], references: [hospitalId, id])
   conflicts   ConflictCase[]
   journals    JournalEntry[]
   @@unique([hospitalId, id])

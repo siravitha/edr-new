@@ -1,76 +1,105 @@
-// C:\Working\edr-new\app\api\assets\route.ts
-import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { NextResponse } from "next/server";
+import { prisma } from "../../../lib/prisma";
 
-const prisma = new PrismaClient();
-
-// GET /api/assets — List with pagination + filter
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const page = parseInt(searchParams.get('page') || '1');
-    const pageSize = parseInt(searchParams.get('pageSize') || '20');
-    const search = searchParams.get('search') || '';
-    const status = searchParams.get('status') || '';
-    const department = searchParams.get('department') || '';
+    const hospitalId = searchParams.get("hospitalId") || "";
+    const wardId = searchParams.get("wardId") || "";
+    const status = searchParams.get("status") || "";
+    const year = searchParams.get("year") || "";
 
-    const where: any = {};
-    if (search) {
-      where.OR = [
-        { assetNo: { contains: search } },
-        { name: { contains: search } },
-      ];
-    }
-    if (status) where.status = status;
-    if (department) where.department = department;
+    const assetWhere: Record<string, unknown> = {};
+    if (hospitalId) assetWhere.hospitalId = hospitalId;
+    if (wardId) assetWhere.wardId = wardId;
+    if (status) assetWhere.status = status;
 
-    const [assets, total] = await Promise.all([
-      prisma.asset.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      prisma.asset.count({ where }),
+    // KPIs
+    const [totalAssets, assetsWithCost, activePlans, openPOs, pendingClaims, disposedAssets] = await Promise.all([
+      prisma.asset.count({ where: assetWhere }),
+      prisma.asset.aggregate({ _sum: { cost: true }, where: assetWhere }),
+      prisma.plan.count({ where: { approved: true, ...(year ? { fiscalYear: parseInt(year) } : {}) } }),
+      prisma.purchaseOrder.count({ where: { status: { notIn: ["CANCELLED", "COMPLETED"] }, ...(hospitalId ? { hospitalId } : {}) } }),
+      prisma.paymentClaim.count({ where: { status: { in: ["DRAFT", "PENDING"] }, ...(hospitalId ? { hospitalId } : {}) } }),
+      prisma.asset.count({ where: { ...assetWhere, status: "DISPOSED" } }),
     ]);
+
+    // By Status (groupBy)
+    const byStatusRaw = await prisma.asset.groupBy({
+      by: ["status"],
+      where: assetWhere,
+      _count: { _all: true },
+    });
+    const byStatus = byStatusRaw.map(s => ({ status: s.status, count: s._count._all }));
+
+    // By Ward (as "department" equivalent)
+    const byWardRaw = await prisma.asset.groupBy({
+      by: ["wardId"],
+      where: assetWhere,
+      _count: { _all: true },
+      _sum: { cost: true },
+    });
+    const byDepartment = byWardRaw.map(w => ({
+      department: w.wardId || "-",
+      count: w._count._all,
+      value: Math.round(Number(w._sum.cost || 0) / 1000),
+    })).sort((a, b) => b.count - a.count).slice(0, 8);
+
+    // Monthly Trend - last 12 months (based on AuditLog createdAt)
+    const now = new Date();
+    const monthlyTrend = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const nextD = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      const monthLabel = d.toLocaleDateString("en", { month: "short", year: "2-digit" });
+      const [created, completed] = await Promise.all([
+        prisma.asset.count({ where: { ...assetWhere } }),
+        prisma.auditLog.count({ where: { createdAt: { gte: d, lt: nextD }, ...(hospitalId ? { hospitalId } : {}) } }),
+      ]);
+      monthlyTrend.push({ month: monthLabel, created, completed });
+    }
+
+    // Procurement Pipeline
+    const pipelineRaw = await prisma.purchaseOrder.groupBy({
+      by: ["status"],
+      where: hospitalId ? { hospitalId } : {},
+      _count: { _all: true },
+    });
+    const procurementPipeline = pipelineRaw.map(p => ({
+      stage: p.status,
+      count: p._count._all,
+      value: 0,
+    }));
+
+    // Recent Activity (AuditLog)
+    const auditLogs = await prisma.auditLog.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      where: hospitalId ? { hospitalId } : {},
+    });
+    const recentActivity = auditLogs.map(log => ({
+      id: log.id,
+      action: log.eventType,
+      actor: log.actorSubject || "system",
+      timestamp: log.createdAt?.toISOString() || "",
+    }));
 
     return NextResponse.json({
       success: true,
-      data: assets,
-      pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
-    });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-  }
-}
-
-// POST /api/assets — Create
-export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const { assetNo, name, department, cost, quantity, purchaseDate, notes } = body;
-
-    if (!assetNo || !name) {
-      return NextResponse.json(
-        { success: false, error: 'assetNo and name are required' },
-        { status: 400 }
-      );
-    }
-
-    const asset = await prisma.asset.create({
       data: {
-        assetNo,
-        name,
-        department: department || '',
-        cost: cost ? new Decimal(cost) : new Decimal(0),
-        quantity: quantity || 1,
-        purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
-        notes: notes || null,
-        status: 'ACTIVE',
+        totalAssets,
+        totalValue: Number(assetsWithCost._sum.cost || 0),
+        activePlans,
+        openPOs,
+        pendingClaims,
+        overdueItems: disposedAssets,
+        byDepartment,
+        byStatus,
+        monthlyTrend,
+        procurementPipeline,
+        recentActivity,
       },
     });
-
-    return NextResponse.json({ success: true, data: asset }, { status: 201 });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
