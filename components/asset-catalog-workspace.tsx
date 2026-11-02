@@ -146,6 +146,15 @@ export function AssetCatalogWorkspace() {
   const handleNew = () => { setEditing(null); setShowForm(true); setError(""); setSuccess(""); };
   const closeForm = () => { setShowForm(false); setEditing(null); };
 
+  const handleExport = () => {
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    if (statusFilter) params.set("status", statusFilter);
+    if (wardFilter) params.set("wardId", wardFilter);
+    const qs = params.toString();
+    window.open(`/api/assets/export${qs ? "?" + qs : ""}`, "_blank");
+  };
+
   const statusBadge = (s: AssetStatus) => (
     <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", statusStyles[s] || "bg-blue-100 text-blue-700")}>
       {statusLabels[s] || s}
@@ -162,7 +171,10 @@ export function AssetCatalogWorkspace() {
           <h1 className="text-2xl font-bold tracking-tight">Asset Catalog</h1>
           <p className="text-sm text-muted-foreground mt-1">Search, filter, and manage hospital assets</p>
         </div>
-        <Button onClick={handleNew}>+ New Asset</Button>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={handleExport}>Export</Button>
+          <Button onClick={handleNew}>+ New Asset</Button>
+        </div>
       </div>
 
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
@@ -325,3 +337,4 @@ export interface CatalogProposal {
 }
 
 export default AssetCatalogWorkspace;
+
