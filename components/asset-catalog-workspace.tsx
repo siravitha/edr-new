@@ -1,14 +1,233 @@
-"use client";
-import {useState} from "react";
-import catalog from "@/lib/data/asset-catalog.json";
-import {Card,CardHeader,CardTitle,CardContent} from "@/components/ui/card";
-import {Button} from "@/components/ui/button";
-import {useSystemActivity} from "@/components/system-activity";
-export type CatalogProposal={id:string;catalogId:string;proposedPrefix:string;reason:string;status:"PROPOSED";actorId:string;at:string};
-const searchable=(value:string)=>value.normalize('NFKC').replace(/\u0e4d\u0e32/g,'\u0e33').toLowerCase();
-export function AssetCatalogWorkspace({role,editable,proposals,onPropose}:{role:string;editable:boolean;proposals:CatalogProposal[];onPropose:(proposal:CatalogProposal)=>Promise<boolean>}){
- const [query,setQuery]=useState(''),[group,setGroup]=useState('all'),[duplicates,setDuplicates]=useState(false),[offset,setOffset]=useState(0),[detail,setDetail]=useState<string|null>(null),[prefix,setPrefix]=useState(''),[reason,setReason]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);const report=useSystemActivity();
- const rows=catalog.rows.filter(r=>(group==='all'||r.group===group)&&(!duplicates||r.duplicateSourceCode)&&searchable(`${r.classCode} ${r.rawKindCode} ${r.title}`).includes(searchable(query))),selected=catalog.rows.find(r=>r.id===detail);
- async function propose(){if(!selected||role!=='procurement'||!editable||busy)return;if(!/^\d{4}-\d{3}$/.test(prefix)||!reason.trim()){setMessage('ระบุรหัสประเภท–ชนิดรูปแบบ 0000-000 และเหตุผล');return;}setBusy(true);try{if(await onPropose({id:crypto.randomUUID(),catalogId:selected.id,proposedPrefix:prefix,reason:reason.trim(),status:'PROPOSED',actorId:'demo-procurement',at:new Date().toISOString()})){setMessage('บันทึกข้อเสนอแล้ว ยังไม่ใช่รหัสอนุมัติสำหรับออกเลข');setReason('');}else setMessage('บันทึกไม่สำเร็จ');}finally{setBusy(false);}}
- return <div className="planning-workspace"><div className="demo-banner">บัญชีรหัสจากเอกสารแนบ 68 หน้า · แสดงคอลัมน์ตามต้นฉบับ ไม่แปลงชนิด 4 หลักเป็นรหัสใช้งาน 3 หลักโดยอัตโนมัติ</div><Card><CardHeader><div><CardTitle>บัญชีรหัสครุภัณฑ์จากคู่มือ</CardTitle><p className="panel-subtitle">ถอดตารางได้ {catalog.rows.length} รายการ พร้อมเลขหน้า PDF และรายการรหัสซ้ำที่ต้องทวนสอบ</p></div></CardHeader><CardContent><div className="planning-toolbar"><label className="form-field">ค้นหารหัสหรือชื่อ<input value={query} onChange={e=>{setQuery(e.target.value);setOffset(0);}} placeholder="เช่น 6515 เครื่องช่วยหายใจ"/></label><label className="form-field">กลุ่ม<select value={group} onChange={e=>{setGroup(e.target.value);setOffset(0);}}><option value="all">ทุกกลุ่ม</option>{[...new Set(catalog.rows.map(r=>r.group))].map(g=><option key={g} value={g}>กลุ่ม {g}</option>)}</select></label><label className="checkbox-row"><input type="checkbox" checked={duplicates} onChange={e=>{setDuplicates(e.target.checked);setOffset(0);}}/>เฉพาะรหัสดิบซ้ำในต้นฉบับ</label></div><p className="muted">พบ {rows.length} รายการ · มีข้อเสนอจับคู่รหัส {proposals.length} รายการ · ข้อเสนอยังไม่เพิ่มสิทธิ์ออกเลข</p></CardContent><div className="table-wrap"><table className="data-table"><thead><tr><th>ประเภทตามต้นฉบับ</th><th>ชนิดตามต้นฉบับ</th><th>รายการ</th><th>หน้า PDF</th><th>การทวนสอบ</th></tr></thead><tbody>{rows.slice(offset,offset+50).map(r=><tr key={r.id}><td>{r.classCode}</td><td>{r.rawKindCode}</td><td>{r.title}{r.duplicateSourceCode&&<small className="planning-block warning-text">รหัสเดียวกันปรากฏมากกว่าหนึ่งรายการในต้นฉบับ</small>}</td><td>{r.pdfPage}</td><td><Button variant="secondary" size="sm" onClick={()=>{setDetail(r.id);setPrefix('');setReason('');setMessage('');void report({action:'VIEW_CATALOG_ENTRY',module:'asset-catalog',target:r.id,outcome:'OBSERVED'});}}>เปิด {r.id}</Button></td></tr>)}</tbody></table></div><div className="pagination"><span>แสดง {Math.min(offset+1,rows.length)}–{Math.min(offset+50,rows.length)} จาก {rows.length}</span><div className="heading-actions"><Button variant="secondary" size="sm" disabled={!offset} onClick={()=>setOffset(Math.max(0,offset-50))}>ก่อนหน้า</Button><Button variant="secondary" size="sm" disabled={offset+50>=rows.length} onClick={()=>setOffset(offset+50)}>ถัดไป</Button></div></div></Card>{selected&&<Card><CardHeader><CardTitle>{selected.title}</CardTitle><Button variant="ghost" onClick={()=>setDetail(null)}>ปิดรายละเอียดรหัส</Button></CardHeader><CardContent><p>ประเภท {selected.classCode} · ชนิดดิบ {selected.rawKindCode} · กลุ่ม {selected.group} · หน้า PDF {selected.pdfPage}</p><p className="muted">ยังไม่ใช่เลขประจำเครื่อง และยังไม่ถือว่าเป็นคู่รหัส 4–3 หลักที่อนุมัติแล้ว</p><label className="form-field">เสนอรหัสประเภท–ชนิดสำหรับโรงพยาบาล<input disabled={role!=='procurement'||!editable||busy} maxLength={8} placeholder="0000-000" value={prefix} onChange={e=>setPrefix(e.target.value)}/></label><label className="form-field">เหตุผล / เอกสารประกอบการจับคู่<textarea disabled={role!=='procurement'||!editable||busy} maxLength={2000} value={reason} onChange={e=>setReason(e.target.value)}/></label><Button disabled={role!=='procurement'||!editable||busy||!prefix||!reason.trim()} onClick={propose}>บันทึกข้อเสนอจับคู่รหัส</Button>{message&&<p role="status">{message}</p>}{proposals.filter(p=>p.catalogId===selected.id).map(p=><div className="stat-row" key={p.id}><span>{p.proposedPrefix} · {p.reason}</span><span className="badge warning">รอผู้มีอำนาจพิจารณา</span></div>)}</CardContent></Card>}<Card><CardHeader><CardTitle>ที่มาและขอบเขต</CardTitle></CardHeader><CardContent><p>{catalog.source.fileName} · {catalog.source.pageCount} หน้า</p><p className="muted">SHA-256: {catalog.source.sha256}</p><p>เก็บชื่อและรหัสดิบจากตารางครบทุกหน้าที่มีรายการ ไม่มีการถือว่าคู่มือกรมสุขภาพจิตเป็นกติกาของโรงพยาบาลอุดรธานี</p><p className="muted">ต้องทวนสอบความหมายรหัส ความสอดคล้องของตัวอย่าง และเอกสารที่มีผลใช้ก่อนอนุมัติคู่รหัสใช้งานใหม่ ผู้อนุมัติเพิ่มรหัสและแก้เลขยังไม่ได้รับการยืนยัน จึงไม่มีปุ่มอนุมัติหรือแก้เลขทางการ</p></CardContent></Card></div>;
+// C:\Working\edr-new\components\asset-catalog-workspace.tsx
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+
+interface Asset {
+  id: string;
+  assetNo: string;
+  name: string;
+  department: string;
+  cost: string;
+  quantity: number;
+  purchaseDate: string;
+  status: string;
+  notes?: string;
+  createdAt: string;
 }
+
+interface Pagination {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+const STATUS_BADGES: Record<string, { bg: string; text: string; label: string }> = {
+  ACTIVE: { bg: 'bg-green-100', text: 'text-green-700', label: 'Active' },
+  DRAFT: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Draft' },
+  PENDING: { bg: 'bg-yellow-100', text: 'text-yellow-700', label: 'Pending' },
+  RETIRED: { bg: 'bg-red-100', text: 'text-red-700', label: 'Retired' },
+};
+
+export default function AssetCatalogWorkspace() {
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [pagination, setPagination] = useState<Pagination>({ page: 1, pageSize: 20, total: 0, totalPages: 0 });
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+  const [form, setForm] = useState({ assetNo: '', name: '', department: '', cost: '', quantity: '1', purchaseDate: '', notes: '' });
+  const [formError, setFormError] = useState('');
+
+  const fetchAssets = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ page: '1', pageSize: '20' });
+      if (search) params.set('search', search);
+      if (statusFilter) params.set('status', statusFilter);
+
+      const res = await fetch(`/api/assets?${params}`);
+      const json = await res.json();
+      if (json.success) {
+        setAssets(json.data);
+        setPagination(json.pagination);
+      }
+    } catch (e) {
+      console.error('Failed to fetch assets', e);
+    } finally {
+      setLoading(false);
+    }
+  }, [search, statusFilter]);
+
+  useEffect(() => { fetchAssets(); }, [fetchAssets]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError('');
+    try {
+      const url = editingAsset ? `/api/assets/${editingAsset.id}` : '/api/assets';
+      const method = editingAsset ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...form,
+          cost: form.cost ? parseFloat(form.cost) : 0,
+          quantity: parseInt(form.quantity) || 1,
+          purchaseDate: form.purchaseDate || new Date().toISOString(),
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error);
+
+      setShowForm(false);
+      setEditingAsset(null);
+      setForm({ assetNo: '', name: '', department: '', cost: '', quantity: '1', purchaseDate: '', notes: '' });
+      fetchAssets();
+    } catch (err: any) {
+      setFormError(err.message);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Delete this asset?')) return;
+    await fetch(`/api/assets/${id}`, { method: 'DELETE' });
+    fetchAssets();
+  };
+
+  const openEdit = (asset: Asset) => {
+    setEditingAsset(asset);
+    setForm({
+      assetNo: asset.assetNo,
+      name: asset.name,
+      department: asset.department || '',
+      cost: String(asset.cost),
+      quantity: String(asset.quantity),
+      purchaseDate: asset.purchaseDate?.slice(0, 10) || '',
+      notes: asset.notes || '',
+    });
+    setShowForm(true);
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Asset Catalog</h1>
+          <p className="text-sm text-gray-500">{pagination.total} assets</p>
+        </div>
+        <button
+          onClick={() => { setShowForm(true); setEditingAsset(null); }}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+        >
+          + New Asset
+        </button>
+      </div>
+
+      {/* Filters */}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          placeholder="Search asset no. or name..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="flex-1 max-w-sm px-3 py-2 border border-gray-300 rounded-lg text-sm"
+        />
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+        >
+          <option value="">All Status</option>
+          <option value="ACTIVE">Active</option>
+          <option value="DRAFT">Draft</option>
+          <option value="PENDING">Pending</option>
+          <option value="RETIRED">Retired</option>
+        </select>
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        {loading ? (
+          <div className="p-8 text-center text-gray-500">Loading...</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">Asset No.</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">Name</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">Department</th>
+                <th className="text-right px-4 py-3 font-medium text-gray-600">Cost</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Qty</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
+                <th className="text-right px-4 py-3 font-medium text-gray-600">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {assets.map(asset => {
+                const badge = STATUS_BADGES[asset.status] || STATUS_BADGES.ACTIVE;
+                return (
+                  <tr key={asset.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 font-mono text-xs">{asset.assetNo}</td>
+                    <td className="px-4 py-3 font-medium">{asset.name}</td>
+                    <td className="px-4 py-3 text-gray-500">{asset.department}</td>
+                    <td className="px-4 py-3 text-right">฿{Number(asset.cost).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-center">{asset.quantity}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${badge.bg} ${badge.text}`}>
+                        {badge.label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button onClick={() => openEdit(asset)} className="text-blue-600 hover:text-blue-800 mr-3">Edit</button>
+                      <button onClick={() => handleDelete(asset.id)} className="text-red-600 hover:text-red-800">Delete</button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {assets.length === 0 && (
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No assets found</td></tr>
+              )}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Form Modal */}
+      {showForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-lg shadow-xl">
+            <h2 className="text-lg font-bold mb-4">{editingAsset ? 'Edit Asset' : 'New Asset'}</h2>
+            {formError && <p className="text-red-600 text-sm mb-3">{formError}</p>}
+            <form onSubmit={handleSubmit} className="space-y-3">
+              <div>
+                <label className="text-sm font-medium text-gray-700">Asset No. *</label>
+                <input type="text" required value={form.assetNo} onChange={e => setForm(f => ({ ...f, assetNo: e.target.value }))}
+                  className="mt-1 w-full px-3 py-2 border rounded-lg text-sm" placeholder="AST-2026-0001" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700">Name *</label>
+                <input type="text" required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                  className="mt-1 w-full px-3 py-2 border rounded-lg text-sm" placeholder="Medical Equipment..." />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Department</label>
+                  <input type="text" value={form.department} onChange={e => setForm(f => ({ ...f, department: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Cost (฿)</label>
+                  <input type="number" min="0" step="0.01" value={form.cost} onChange={e => setForm(f => ({ ...f, cost: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Quantity</label>
+                  <input type="number" min="1" value={form.quantity} onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))}
+                    className="mt-1 w-full px-
