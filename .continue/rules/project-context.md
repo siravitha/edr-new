@@ -106,7 +106,8 @@ NOTE: CSV import is CLIENT-SIDE (components/legacy-excel-import.tsx + lib/csv.mj
 - POST /api/auth { staffCode, password }: staffCode is .toUpperCase() server-side before lookup
   ("admin" == "ADMIN"). 401 on bad creds; success writes a UserLoginLog row.
 - Roles: ADMIN (all), WAREHOUSE (all assets), WARD (scoped to user.wards wardIds), AUDITOR (read-only).
-- Seeded users (password uth12345): ADMIN, WARE-01 (WAREHOUSE), WARD-01 (WARD), AUDIT-01 (AUDITOR).
+- Seeded logins: ADMIN (pw `admin`) is the standard admin; 12345, WARE-01, WARD-01,
+  AUDIT-01 all use pw `uth12345` (roles ADMIN / WAREHOUSE / WARD / AUDITOR).
 - Session is a signed cookie; /api/auth GET returns the current public user (or 401).
 
 ## Feature status (honest, as of 2026-03-11)
@@ -137,9 +138,15 @@ NOTE: CSV import is CLIENT-SIDE (components/legacy-excel-import.tsx + lib/csv.mj
 - Read the matching docs/ file before changing a module
 
 ## Repo notes
-- prisma/dev.db is COMMITTED as a binary (SQLite data lives in git); the 4
-  seeded users (ADMIN/WARE-01/WARD-01/AUDIT-01) were added to it this session.
-- seed-uth-users.mjs + set-admin.mjs are committed top-level helpers
-  (consider moving into scripts/).
-- Uncommitted right now: AGENTS.md, .continue/rules/project-context.md,
-  prisma/dev.db.
+- prisma/dev.db is COMMITTED as a binary (SQLite data lives in git) - KEEP it
+  committed: the datasource path is the same absolute path on local + DGX, so it
+  is how seeded test data syncs via git push/pull; do NOT gitignore it.
+- Seed helpers live in scripts/ (run from repo root):
+    node scripts/seed-uth-users.mjs  -> 4 role accounts
+    node scripts/set-admin.mjs       -> ADMIN (pw admin)
+- Seeded logins in dev.db (staffCode / password -> role):
+    ADMIN   / admin     -> ADMIN      (standard admin login; set-admin.mjs)
+    12345   / uth12345  -> ADMIN      (seed-uth-users.mjs)
+    WARE-01 / uth12345  -> WAREHOUSE  (seed-uth-users.mjs)
+    WARD-01 / uth12345  -> WARD       (seed-uth-users.mjs)
+    AUDIT-01/ uth12345  -> AUDITOR    (seed-uth-users.mjs)

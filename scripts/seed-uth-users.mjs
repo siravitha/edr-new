@@ -1,10 +1,10 @@
 /**
  * หนึ่งครั้ง: สร้างบัญชีทดลอง (4 บทบาท) ลง dev.db โดยตรง
  * ใช้ hashPassword เดียวกับระบบ (lib/auth.mjs) → เข้า log in ได้ทันที
- * รัน: node seed-uth-users.mjs
+ * รัน: node scripts/seed-uth-users.mjs
  */
-import { PrismaClient } from "./backend/node_modules/@prisma/client/default.js";
-import { hashPassword } from "./lib/auth.mjs";
+import { PrismaClient } from "../backend/node_modules/@prisma/client/default.js";
+import { hashPassword } from "../lib/auth.mjs";
 
 const prisma = new PrismaClient({
   datasources: { db: { url: "file:///home/admin/Working/edr-new/prisma/dev.db" } },

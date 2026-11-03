@@ -1,5 +1,5 @@
-import { PrismaClient } from "./backend/node_modules/@prisma/client/default.js";
-import { hashPassword } from "./lib/auth.mjs";
+import { PrismaClient } from "../backend/node_modules/@prisma/client/default.js";
+import { hashPassword } from "../lib/auth.mjs";
 
 // Login route uppercases staffCode (app/api/auth/route.ts), so the key MUST be stored
 // uppercase to match what the user types. User asked for: username "admin" / password "admin".

@@ -50,7 +50,8 @@ IndexedDB) until the Phase-2 MySQL schema is adopted. See docs/ for design.
   - POST /api/auth { staffCode, password } -> sets session cookie; 401 on bad creds.
   - staffCode is .toUpperCase() on the SERVER before lookup: "admin" == "ADMIN".
   - Roles: ADMIN (all), WAREHOUSE (all assets), WARD (only wards in user.wards), AUDITOR (read-only).
-  - Seeded (password: uth12345): ADMIN, WARE-01, WARD-01, AUDIT-01  (see lib/seed.ts).
+  - Seeded: ADMIN (pw admin, standard) + 12345/WARE-01/WARD-01/AUDIT-01 (pw uth12345).
+    Roles: ADMIN/WAREHOUSE/WARD/AUDITOR (see lib/seed.ts + scripts/seed-uth-users.mjs).
   - Every login attempt is written to UserLoginLog.
 
 ## Feature status (honest)
@@ -70,8 +71,14 @@ IndexedDB) until the Phase-2 MySQL schema is adopted. See docs/ for design.
   - Read the matching docs/ file before changing a module
 
 ## Repo notes
-  - prisma/dev.db is COMMITTED as a binary (SQLite data lives in git).
-  - seed-uth-users.mjs + set-admin.mjs are committed top-level helpers
-    (consider moving into scripts/).
-  - The 4 seeded users (ADMIN/WARE-01/WARD-01/AUDIT-01) were added to dev.db
-    this session (password uth12345).
+  - prisma/dev.db is COMMITTED as a binary (SQLite data lives in git) - KEEP it
+    committed: the datasource path is the same absolute path on local + DGX, so
+    this is how seeded test data syncs via git push/pull. Do NOT gitignore it.
+  - Seed helpers (run from repo root): `node scripts/seed-uth-users.mjs` (4 role
+    accounts) and `node scripts/set-admin.mjs` (creates ADMIN/admin).
+  - Seeded logins in dev.db (staffCode / password -> role):
+      ADMIN   / admin     -> ADMIN      (standard admin login; set-admin.mjs)
+      12345   / uth12345  -> ADMIN      (seed-uth-users.mjs)
+      WARE-01 / uth12345  -> WAREHOUSE  (seed-uth-users.mjs)
+      WARD-01 / uth12345  -> WARD       (seed-uth-users.mjs)
+      AUDIT-01/ uth12345  -> AUDITOR    (seed-uth-users.mjs)
