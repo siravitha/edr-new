@@ -30,6 +30,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   const { id } = await params;
   const existing = await prisma.asset.findUnique({ where: { id } });
+  if (!existing) return NextResponse.json({ error: "NOT_FOUND", message: "Asset not found." }, { status: 404 });
   const check = singleAssetOk(gate.value, existing);
   if (!check.ok) return reject(check);
 

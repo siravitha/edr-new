@@ -37,7 +37,12 @@ function recordOf(row: { id: string; hospitalId: string; state: unknown; version
   return { hospitalId: row.hospitalId, state: row.state as FlowState, version: row.version, updatedAt: row.updatedAt.toISOString() };
 }
 
-function eventData(ev: FlowEventInput, docId: string, hospitalId: string, revision: number) {
+function eventData(
+  ev: FlowEventInput,
+  docId: string,
+  hospitalId: string,
+  revision: number,
+): Prisma.FlowEventUncheckedCreateInput {
   return {
     docId,
     hospitalId,
@@ -46,7 +51,7 @@ function eventData(ev: FlowEventInput, docId: string, hospitalId: string, revisi
     actorId: ev.actorId ?? null,
     actorRole: ev.actorRole ?? null,
     caseId: ev.caseId ?? null,
-    payload: ev.payload ? (ev.payload as unknown as Prisma.InputJsonValue) : null,
+    payload: ev.payload ? (ev.payload as unknown as Prisma.InputJsonValue) : undefined,
   };
 }
 
@@ -84,8 +89,10 @@ export async function commitFlowState(
 
     if (updated.count > 0) {
       const row = await tx.flowStateDoc.findUnique({ where: { hospitalId } });
-      if (row && event) await tx.flowEvent.create({ data: eventData(event, row.id, hospitalId, newVersion) });
-      return recordOf(row);
+      if (row) {
+        if (event) await tx.flowEvent.create({ data: eventData(event, row.id, hospitalId, newVersion) });
+        return recordOf(row);
+      }
     }
 
     // No row matched: either missing (first commit) or version is stale (conflict).

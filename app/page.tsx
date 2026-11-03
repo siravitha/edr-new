@@ -5,7 +5,7 @@ import type {ExecutiveDepartment} from "@/lib/executive-dashboard";
 
 import { DepartmentNavigation } from "@/components/department-navigation";
 import { ProcurementFlowWorkspace } from "@/components/procurement-flow-workspace";
-import { transitionFlow, emptyFlow, type FlowCommand } from "@/lib/procurement-flow";
+import { transitionFlow, emptyFlow, type FlowCommand, type FlowState } from "@/lib/procurement-flow";
 import { workspaceItems } from "@/lib/workspace-menu";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -143,6 +143,7 @@ export default function Home() {
   const [duplicateTab, setDuplicateTab] = useState(false);
   const [lockReady, setLockReady] = useState(false);
   const writingRef = useRef(false);
+  const flowDocVersionRef = useRef<number | null>(null);
   const importGeneration = useRef(0);
   const importedSource = useRef("");
   const selectedReportSection = reportSections.find(n => n.id === page);
@@ -179,10 +180,53 @@ export default function Home() {
     finally { writingRef.current = false; setBusy(false); }
   }
 
+  async function fetchServerFlow(): Promise<{ data: FlowState; version: number } | null> {
+    try {
+      const response = await fetch(`/api/flows/state?hospitalId=${encodeURIComponent(HOSPITAL)}`, { cache: "no-store" });
+      if (!response.ok) return null;
+      const payload = await response.json();
+      const parsed = payload?.data ?? payload;
+      if (!parsed?.revision && !parsed?.cases) return null;
+      return { data: parsed as FlowState, version: Number(payload?.version ?? parsed.revision ?? 0) };
+    } catch { return null; }
+  }
+
+  async function persistFlowToServer(flow: FlowState): Promise<"ok" | "conflict" | "error"> {
+    const body: Record<string, unknown> = { hospitalId: HOSPITAL, flow };
+    if (flowDocVersionRef.current !== null) body.expectedVersion = flowDocVersionRef.current;
+    try {
+      const response = await fetch("/api/flows/state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        flowDocVersionRef.current = Number(payload?.version ?? flow.revision ?? flowDocVersionRef.current);
+        return "ok";
+      }
+      if (response.status === 409) return "conflict";
+      notify("บันทึกข้อมูลไหลงานบนเซิร์ฟเวอร์ไม่สำเร็จ รายการยังไม่ถูกยืนยัน", true);
+      return "error";
+    } catch {
+      notify("บันทึกข้อมูลไหลงานบนเซิร์ฟเวอร์ไม่สำเร็จ รายการยังไม่ถูกยืนยัน", true);
+      return "error";
+    }
+  }
+
+  async function resetFlowOnServer(): Promise<boolean> {
+    if (!data.procurementFlow) return true;
+    const resetFlow = { ...emptyFlow(), counters: data.procurementFlow.counters };
+    const result = await persistFlowToServer(resetFlow);
+    if (result === "conflict") { notify("ข้อมูลไหลงานถูกแก้ไขระหว่างรีเซ็ต กรุณาลองใหม่อีกครั้ง", true); return false; }
+    if (result === "error") return false;
+    return true;
+  }
+
   useEffect(() => {
     let cancelled = false;
     let releaseLock: (() => void) | undefined;
-    loadState().then(async value => { await initializeSystemLog(value,logContext);await appendSystemActivity(logContext,{action:"APP_OPEN",module:"session",outcome:"OBSERVED"}); if (!cancelled) { stateRef.current = value; setData(value); setReady(true); } }).catch(() => { setStorageError(true); setReady(true); });
+    loadState().then(async value => { await initializeSystemLog(value,logContext);await appendSystemActivity(logContext,{action:"APP_OPEN",module:"session",outcome:"OBSERVED"}); if (cancelled) return; const server = await fetchServerFlow(); if (cancelled) return; if (server) { value.procurementFlow = server.data; flowDocVersionRef.current = server.version; } stateRef.current = value; setData(value); setReady(true); }).catch(() => { setStorageError(true); setReady(true); });
     setNetworkOnline(navigator.onLine);
     const update = () => setNetworkOnline(navigator.onLine);
     window.addEventListener("online", update); window.addEventListener("offline", update);
@@ -287,8 +331,24 @@ export default function Home() {
   }
   async function runFlow(command:FlowCommand,file?:PlanningFileWrite){
     if(!editable||isOffline)return false;
-    try{const result=transitionFlow({...data,masterData},command,{id:actor.id,role,hospitalId:HOSPITAL,online:!isOffline},(data.procurementFlow??emptyFlow()).revision);return await commit(result.data,file,{action:command.type,module:"procurement-flow",target:result.target});}
-    catch(error){const reason=error instanceof Error?error.message:"Cannot save";notify(reason,true);await reportActivity({action:command.type,module:"procurement-flow",outcome:"REJECTED",reason});return false;}
+    if(writingRef.current||data!==stateRef.current){notify("มีรายการกำลังบันทึก กรุณารอแล้วลองอีกครั้ง",true);return false;}
+    const actorCtx={id:actor.id,role,hospitalId:HOSPITAL,online:!isOffline};
+    writingRef.current=true;setBusy(true);
+    try{
+      let next=transitionFlow({...data,masterData},command,actorCtx,(data.procurementFlow??emptyFlow()).revision);
+      for(let attempt=0;attempt<2;attempt++){
+        const server=await persistFlowToServer(next.data.procurementFlow??emptyFlow());
+        if(server==="conflict"){const latest=await fetchServerFlow();if(!latest){notify("โหลดข้อมูลล่าสุดไม่สำเร็จ กรุณาเชื่อมต่อแล้วลองใหม่อีกครั้ง",true);return false;}next=transitionFlow({...data,masterData,procurementFlow:latest.data},command,actorCtx,latest.data.revision);continue;}
+        if(server==="error")return false;
+        let localOk=true;
+        try{await saveState(next.data,file,logContext,{action:command.type,module:"procurement-flow",target:next.target});}catch{localOk=false;}
+        stateRef.current=next.data;setData(next.data);
+        if(!localOk)notify("บันทึกไหลงานแล้ว แต่แคชในเครื่องล้มเหลว",true);
+        return true;
+      }
+      notify("ข้อมูลไหลงานถูกแก้ไขระหว่างบันทึก กรุณาลองใหม่อีกครั้ง",true);return false;
+    }catch(error){const reason=error instanceof Error?error.message:"Cannot save";notify(reason,true);await reportActivity({action:command.type,module:"procurement-flow",outcome:"REJECTED",reason});return false;}
+    finally{writingRef.current=false;setBusy(false);}
   }
   async function paymentAction(event: string) {
     if (!payment || isOffline) return;
@@ -368,7 +428,7 @@ export default function Home() {
     {modal === "payment" && payment && <Modal title={`${payment.claimNo} · รุ่น ${payment.revision}`} close={() => setModal(null)} footer={<>{payment.status === "SUBMITTED" && role === "finance" && <><Button variant="secondary" disabled={!editable || isOffline || !reason.trim()} onClick={() => paymentAction("RETURN")}>ส่งคืนแก้ไข</Button><Button disabled={!editable || isOffline || !evidence || !signature} onClick={() => paymentAction("APPROVE")}>อนุมัติจำลอง</Button></>}{payment.status === "RETURNED" && role === "procurement" && <Button disabled={!editable || isOffline} onClick={() => paymentAction("RESUBMIT")}>สร้างรุ่นใหม่และส่งตรวจ</Button>}</>}><h3>{payment.title}</h3><div className="stat-row"><span>สถานะจัดซื้อ</span><span className="badge neutral">{payment.poNo} · CLOSED</span></div><div className="stat-row"><span>สถานะคำขอ</span><span className={`badge ${tone(payment.status)}`}>{paymentLabels[payment.status]}</span></div><div className="stat-row"><span>จำนวนเงิน</span><strong>฿{money(payment.amount)}</strong></div>{payment.returnReason && <p className="warning-text">เหตุผลส่งคืน: {payment.returnReason}</p>}{payment.status === "SUBMITTED" && role === "finance" && <><label className="form-field section-gap-top">เหตุผลส่งคืน<textarea rows={3} value={reason} maxLength={2000} onChange={e => setReason(e.target.value)} placeholder="เช่น ใบแจ้งหนี้ไม่ตรงกับเอกสารตรวจรับ"/></label><label className="checkbox-row"><input type="checkbox" checked={evidence} onChange={e => setEvidence(e.target.checked)}/>จำลองผลตรวจหลักฐานครบถ้วน</label><label className="checkbox-row"><input type="checkbox" checked={signature} onChange={e => setSignature(e.target.checked)}/>จำลองผลตรวจลายเซ็นและผู้มีอำนาจ</label></>}{payment.history?.length > 0 && <p className="muted">คงสำเนารุ่นเดิมไว้ {payment.history.length} รุ่นในข้อมูลสาธิต</p>}<p className="muted">การติ๊กช่องเป็นการจำลองเท่านั้น ระบบจริงต้องตรวจหลักฐานที่เซิร์ฟเวอร์และยืนยันตัวตนตามอำนาจอนุมัติ</p>{!["finance", "procurement"].includes(role) && <p className="warning-text">เปลี่ยนมุมมองเป็นการเงินหรือพัสดุเพื่อทดลองขั้นตอน</p>}</Modal>}
 
     {modal === "help" && <Modal title="เริ่มทดลองใน 3 นาที" close={() => setModal(null)} footer={<Button onClick={() => { setRole("warehouse"); setModal(null); go("sync"); }}>เริ่มที่คิวออฟไลน์ <ArrowRight size={15}/></Button>}><ol className="help-steps"><li><strong>เลือกบทบาทเจ้าหน้าที่คลัง</strong><p>ใช้ตัวเลือกมุมมองจำลองมุมขวาบน</p></li><li><strong>ทดลองสแกนและออฟไลน์</strong><p>หน้า “คิวซิงก์” → จำลองออฟไลน์ → สแกน → ลองรหัสตัวอย่าง → ยืนยัน จากนั้นกลับออนไลน์และซิงก์</p></li><li><strong>ลองข้อมูลขัดแย้ง</strong><p>กด “จำลองแท็บเล็ตสองเครื่องชนกัน” แล้วดูทั้งสองสถานะและรุ่นข้อมูล</p></li><li><strong>ลองการเงินส่งคืนหลังปิด PO</strong><p>เลือกบทบาทการเงิน → ตรวจรายการแรก → ใส่เหตุผลส่งคืน จากนั้นเปลี่ยนเป็นพัสดุเพื่อสร้างคำขอรุ่นใหม่</p></li></ol><p className="muted">ข้อมูลเก็บใน IndexedDB ของเบราว์เซอร์ ไม่ส่งไปฐานข้อมูลโรงพยาบาล รีเซ็ตได้จากหน้าการเชื่อมต่อ</p></Modal>}
-    {modal === "reset" && <Modal title="เริ่มข้อมูลจำลองใหม่" close={() => setModal(null)} footer={<><Button variant="secondary" onClick={() => setModal(null)}>ยกเลิก</Button><Button disabled={!editable} onClick={async () => { if (await commit({...createSeed(),procurementFlow:data.procurementFlow?{...emptyFlow(),counters:data.procurementFlow.counters}:undefined,assetNumbering:data.assetNumbering?{...data.assetNumbering,intakes:[]}:undefined},undefined,{action:"RESET_DEMO_DATA",module:"settings",target:"demo-state",reason:"ผู้ใช้ยืนยันรีเซ็ตข้อมูลจำลอง โดยคง Log system"})) { setModal(null); notify("รีเซ็ตเฉพาะข้อมูลจำลองแล้ว"); } }}>ยืนยันรีเซ็ต</Button></>}><p>คำสั่งออฟไลน์และข้อมูลธุรกิจในเบราว์เซอร์นี้จะถูกแทนด้วยชุดข้อมูลตัวอย่างเริ่มต้น โดย Log system และตัวนับเลขครุภัณฑ์ยังคงอยู่เพื่อป้องกันการใช้เลขซ้ำ</p></Modal>}
+    {modal === "reset" && <Modal title="เริ่มข้อมูลจำลองใหม่" close={() => setModal(null)} footer={<><Button variant="secondary" onClick={() => setModal(null)}>ยกเลิก</Button><Button disabled={!editable} onClick={async () => { if (!await resetFlowOnServer()) return; if (await commit({...createSeed(),procurementFlow:data.procurementFlow?{...emptyFlow(),counters:data.procurementFlow.counters}:undefined,assetNumbering:data.assetNumbering?{...data.assetNumbering,intakes:[]}:undefined},undefined,{action:"RESET_DEMO_DATA",module:"settings",target:"demo-state",reason:"ผู้ใช้ยืนยันรีเซ็ตข้อมูลจำลอง โดยคง Log system"})) { setModal(null); notify("รีเซ็ตเฉพาะข้อมูลจำลองแล้ว"); } }}>ยืนยันรีเซ็ต</Button></>}><p>คำสั่งออฟไลน์และข้อมูลธุรกิจในเบราว์เซอร์นี้จะถูกแทนด้วยชุดข้อมูลตัวอย่างเริ่มต้น โดย Log system และตัวนับเลขครุภัณฑ์ยังคงอยู่เพื่อป้องกันการใช้เลขซ้ำ</p></Modal>}
     {toast && <div role="status" className={`toast ${toast.error ? "toast-error" : "toast-success"}`}>{toast.message}</div>}
   </div></SystemActivityContext.Provider>;
 }
