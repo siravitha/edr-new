@@ -91,10 +91,10 @@ export function ExecutiveDashboard(_props: ExecutiveDashboardProps = {}) {
 
       const res = await fetch(`/api/dashboard?${params.toString()}`);
       const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'Failed to load');
+      if (!json.success) throw new Error(json.error || 'โหลดข้อมูลไม่สำเร็จ');
       setData(json.data);
     } catch (e: any) {
-      setError(e.message || 'Failed to load dashboard');
+      setError(e.message || 'ไม่สามารถโหลดข้อมูลแดชบอร์ดได้ กรุณาลองใหม่อีกครั้ง');
     } finally {
       setLoading(false);
     }
@@ -107,7 +107,7 @@ export function ExecutiveDashboard(_props: ExecutiveDashboardProps = {}) {
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto" />
-          <p className="text-gray-500 mt-4">Loading dashboard...</p>
+          <p className="text-gray-500 mt-4">กำลังโหลดข้อมูลแดชบอร์ด...</p>
         </div>
       </div>
     );
@@ -120,7 +120,7 @@ export function ExecutiveDashboard(_props: ExecutiveDashboardProps = {}) {
           <p className="text-4xl mb-4">เน€เธโฌเน€เธยเธขยเน€เธเธเธขยเน€เธเธเธขย เน€เธโฌเน€เธยเธขยเน€เธโฌเน€เธยเธขยเน€เธเธเธขย</p>
           <p className="font-medium">{error}</p>
           <button onClick={fetchData} className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-            Retry
+            ลองอีกครั้ง
           </button>
         </div>
       </div>
@@ -257,7 +257,7 @@ export function ExecutiveDashboard(_props: ExecutiveDashboardProps = {}) {
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <h3 className="text-sm font-semibold text-gray-700 mb-4">Recent Activity</h3>
         {data.recentActivity.length === 0 ? (
-          <p className="text-sm text-gray-400">No recent activity</p>
+          <p className="text-sm text-gray-400">ไม่พบกิจกรรมล่าสุด</p>
         ) : (
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {data.recentActivity.map((item, i) => (

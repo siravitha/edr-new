@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { cn, formatCurrency } from "../lib/utils";
-import { downloadAssetPdf } from "../lib/pdf-report";
 
 type AssetStatus = "AVAILABLE" | "IN_USE" | "REPAIR" | "QUARANTINED" | "DISPOSED";
 
@@ -94,7 +93,7 @@ export function AssetCatalogWorkspace(_props: AssetCatalogWorkspaceProps = {}) {
       setTotal(data.total || 0);
       setTotalPages(data.totalPages || 1);
     } catch {
-      setError("Failed to load assets. Is the API running?");
+      setError("เกิดข้อผิดพลาดในการโหลดข้อมูลสินทรัพย์ กรุณาลองใหม่อีกครั้ง");
     } finally {
       setLoading(false);
     }
@@ -126,39 +125,60 @@ export function AssetCatalogWorkspace(_props: AssetCatalogWorkspaceProps = {}) {
           });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Request failed (${res.status})`);
+        throw new Error(data.error || `คำขอไม่สำเร็จ (รหัสสถานะ ${res.status})`);
       }
-      setSuccess(editing ? "Asset updated successfully" : "Asset created successfully");
+      setSuccess(editing ? "แก้ไขสินทรัพย์เรียบร้อยแล้ว" : "สร้างสินทรัพย์เรียบร้อยแล้ว");
       setShowForm(false);
       setEditing(null);
       fetchAssets();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      setError(err instanceof Error ? err.message : "เกิดข้อผิดพลาดบางอย่าง กรุณาลองใหม่อีกครั้ง");
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!window.confirm(`Delete "${name}"?`)) return;
+    if (!window.confirm(`ยืนยันการลบสินทรัพย์ "${name}" ?`)) return;
     try {
       const res = await fetch(`/api/assets/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Failed to delete");
-      setSuccess("Asset deleted");
+      if (!res.ok) throw new Error("การลบสินทรัพย์ไม่สำเร็จ");
+      setSuccess("ลบสินทรัพย์เรียบร้อยแล้ว");
       fetchAssets();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete");
+      setError(err instanceof Error ? err.message : "การลบสินทรัพย์ไม่สำเร็จ");
     }
   };
 
   const handleExportPdf = async () => {
     setExporting(true);
     setError("");
+    setSuccess("");
     try {
-      await downloadAssetPdf({ search, status: statusFilter, wardId: wardFilter, hospitalId: HOSPITAL_ID });
-      setSuccess("PDF report exported");
+      const params = new URLSearchParams({ hospitalId: HOSPITAL_ID });
+      if (search) params.set("search", search);
+      if (statusFilter) params.set("status", statusFilter);
+      if (wardFilter) params.set("wardId", wardFilter);
+      const res = await fetch(`/api/reports/assets-pdf?${params.toString()}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({} as Record<string, unknown>));
+        throw new Error(String(data.error || `การส่งออกเอกสาร PDF ไม่สำเร็จ (รหัสสถานะ ${res.status})`));
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("content-disposition") || "";
+      const m = disposition.match(/filename\*?=([^;]+)/i);
+      const filename = (m ? decodeURIComponent(m[1].replace(/"/g, "").trim()) : null) || `assets-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setSuccess("ส่งออกเอกสาร PDF เรียบร้อยแล้ว");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to export PDF");
+      setError(err instanceof Error ? err.message : "การส่งออกเอกสาร PDF ไม่สำเร็จ");
     } finally {
       setExporting(false);
     }
@@ -228,11 +248,11 @@ export function AssetCatalogWorkspace(_props: AssetCatalogWorkspaceProps = {}) {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex h-48 items-center justify-center text-muted-foreground">Loading...</div>
+            <div className="flex h-48 items-center justify-center text-muted-foreground">กำลังโหลดข้อมูล...</div>
           ) : assets.length === 0 ? (
             <div className="flex h-48 flex-col items-center justify-center gap-3 text-muted-foreground">
-              <p>No assets found</p>
-              <Button variant="secondary" onClick={handleNew}>Create first asset</Button>
+              <p>ไม่พบข้อมูลสินทรัพย์</p>
+              <Button variant="secondary" onClick={handleNew}>สร้างสินทรัพย์แรก</Button>
             </div>
           ) : (
             <>
@@ -242,10 +262,10 @@ export function AssetCatalogWorkspace(_props: AssetCatalogWorkspaceProps = {}) {
                     <tr className="border-b text-left text-muted-foreground">
                       <th className="px-3 py-2 font-medium">Asset No</th>
                       <th className="px-3 py-2 font-medium">Name</th>
-                      <th className="px-3 py-2 font-medium">Ward</th>
-                      <th className="px-3 py-2 font-medium text-right">Cost</th>
+                      <th className="hidden md:table-cell px-3 py-2 font-medium">Ward</th>
+                      <th className="hidden md:table-cell px-3 py-2 font-medium text-right">Cost</th>
                       <th className="px-3 py-2 font-medium">Status</th>
-                      <th className="px-3 py-2 font-medium">Version</th>
+                      <th className="hidden md:table-cell px-3 py-2 font-medium">Version</th>
                       <th className="px-3 py-2 font-medium text-right">Actions</th>
                     </tr>
                   </thead>
@@ -254,10 +274,10 @@ export function AssetCatalogWorkspace(_props: AssetCatalogWorkspaceProps = {}) {
                       <tr key={asset.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                         <td className="px-3 py-2 font-mono text-xs">{asset.assetNo}</td>
                         <td className="px-3 py-2 font-medium">{asset.name}</td>
-                        <td className="px-3 py-2">{asset.wardId || "-"}</td>
-                        <td className="px-3 py-2 text-right">{formatCurrency(Number(asset.cost) || 0)}</td>
+                        <td className="hidden md:table-cell px-3 py-2">{asset.wardId || "-"}</td>
+                        <td className="hidden md:table-cell px-3 py-2 text-right">{formatCurrency(Number(asset.cost) || 0)}</td>
                         <td className="px-3 py-2">{statusBadge(asset.status)}</td>
-                        <td className="px-3 py-2 text-center text-xs text-muted-foreground">v{asset.version}</td>
+                        <td className="hidden md:table-cell px-3 py-2 text-center text-xs text-muted-foreground">v{asset.version}</td>
                         <td className="px-3 py-2">
                           <div className="flex gap-1 justify-end">
                             <Button variant="ghost" size="sm" onClick={() => handleEdit(asset)}>Edit</Button>

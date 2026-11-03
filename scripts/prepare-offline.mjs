@@ -5,7 +5,14 @@ import { resolve } from 'node:path';
 
 const root = resolve('out');
 if (!existsSync(root)) {
-  console.warn(`[prepare-offline] 'out/' directory not found — skipping offline bundle (static export not enabled).`);
+  // Server mode (this app's default): no static 'out/' directory is produced.
+  // Offline capability is provided by the committed public/sw.js PWA service
+  // worker, which Next.js serves at /sw.js and page.tsx registers.
+  if (existsSync(resolve('public', 'sw.js'))) {
+    console.log('[prepare-offline] static export not enabled — offline PWA shell served from committed public/sw.js at /sw.js.');
+  } else {
+    console.warn('[prepare-offline] WARNING: no out/ and no public/sw.js found — the service worker registration in page.tsx will 404.');
+  }
   process.exit(0);
 }
 async function walk(dir, prefix = '') {
