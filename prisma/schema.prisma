@@ -12,6 +12,19 @@ datasource db {
 
 enum AssetStatus {
   AVAILABLE
+enum UserRole {
+  ADMIN
+  WAREHOUSE
+  WARD
+  AUDITOR
+  STRATEGY
+  PROCUREMENT
+  FINANCE
+  LEGAL
+  ACCOUNTING
+  EXECUTIVE
+  NURSE
+}
   IN_USE
   REPAIR
   QUARANTINED
