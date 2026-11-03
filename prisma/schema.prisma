@@ -12,6 +12,12 @@ datasource db {
 
 enum AssetStatus {
   AVAILABLE
+  IN_USE
+  REPAIR
+  QUARANTINED
+  DISPOSED
+}
+
 enum UserRole {
   ADMIN
   WAREHOUSE
@@ -24,18 +30,6 @@ enum UserRole {
   ACCOUNTING
   EXECUTIVE
   NURSE
-}
-  IN_USE
-  REPAIR
-  QUARANTINED
-  DISPOSED
-}
-
-enum UserRole {
-  ADMIN
-  WAREHOUSE
-  WARD
-  AUDITOR
 }
 
 model Plan {
@@ -161,6 +155,52 @@ model AuditLog {
   detail       Json
   createdAt    DateTime @default(now())
   @@index([hospitalId, assetId, createdAt])
+}
+
+/* ================= FLOW PERSISTENCE (state-machine document store + audit) =================
+ * The 15-step lifecycle STATE MACHINE already exists and is tested: lib/procurement-flow.ts
+ * (transitionFlow/emptyFlow — steps, role guards, Separation-of-Duties, budget, claims,
+ *  legal, accounting, optimistic `revision`). Those are the single source of truth for the
+ *  workflow logic — do NOT duplicate the step/role/SoD rules elsewhere.
+ *
+ * These two models persist that state machine to a REAL database so it survives reloads and
+ * gets DB-level guarantees the in-memory version lacks:
+ *   - Transactions : $transaction wraps (read -> transition -> write -> audit) atomically.
+ *   - Concurrency  : optimistic CAS on `version` (UPDATE ... WHERE version=?), so two
+ *                     concurrent writers cannot both win (one gets a 409 conflict).
+ *   - Multi-hospital: every row carries hospitalId and all reads/writes are scoped to it.
+ *   - Audit        : append-only FlowCaseEvent trail (actor, role, command, step, version).
+ * Portable: String/Int/Json + one-to-many only => runs on SQLite AND MySQL/PostgreSQL
+ * (Phase-2) without model changes. `data` holds the state machine's full state object.
+ * ========================================================================== */
+
+model FlowStateDoc {
+  id         String   @id @default(cuid())
+  hospitalId String   @unique
+  state      Json     // the per-hospital FlowState document: { revision, counters, cases[], legal[] }
+  version    Int      // optimistic CAS version; always equals FlowState.revision
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  events     FlowEvent[]
+
+  @@index([hospitalId])
+}
+
+model FlowEvent {
+  id         String       @id @default(cuid())
+  docId      String
+  hospitalId String
+  caseId     String?
+  action     String
+  actorId    String?
+  actorRole  String?
+  revision   Int
+  payload    Json?
+  at         DateTime     @default(now())
+  doc        FlowStateDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId, caseId])
+  @@index([docId])
 }
 
 model SyncReceipt {
