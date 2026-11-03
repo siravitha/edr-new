@@ -1,45 +1,77 @@
-﻿# AGENTS.md - UTH Smart Assets (edr-new)
+# AGENTS.md - UTH Smart Assets (edr-new)
 
 Context for AI coding agents (Cline / Continue / Cursor / Copilot).
 Full detail: read .continue/rules/project-context.md
 
 ## What this is
-Hospital Asset Management system ("UTH Smart Assets") built with
-Next.js 16 (App Router) + React 19 + TypeScript + Prisma (SQLite) + Tailwind + Recharts.
+Hospital Asset Management system ("UTH Smart Assets") for a hospital
+planning -> procurement -> finance -> accounting -> legal workflow plus an
+asset registry. Next.js 16 (App Router) + React 19 + TypeScript + Prisma
+(SQLite) + Tailwind + Recharts.
+STATUS: working PROTOTYPE. Assets + users + dashboard are LIVE on SQLite;
+the 15-step cycle and most department workspaces are DEMO (in-memory /
+IndexedDB) until the Phase-2 MySQL schema is adopted. See docs/ for design.
 
 ## Commands
-  npm run dev          # dev server
-  npm run build        # production build (webpack + offline bundle)
+  npm run dev          # dev server (127.0.0.1:3001)
+  npm run build        # next build --webpack + offline bundle
+  npm start            # serve static export (scripts/serve.mjs)
   npm test             # node --test tests/*.test.mjs
-  npx prisma generate  # regenerate client after schema changes
+  npx prisma generate  # after editing prisma/schema.prisma
 
 ## Repo layout
-  app/page.tsx                         # main tabbed UI
-  app/api/assets/route.ts              # GET list (search/filter/paginate) + POST create
-  app/api/assets/[id]/route.ts         # GET / PUT / DELETE single asset
-  app/api/dashboard/route.ts           # dashboard KPI + chart data
-  components/asset-catalog-workspace.tsx   # asset table + CRUD modal (CURRENT FOCUS)
-  components/executive-dashboard.tsx       # dashboard + Recharts
-  lib/prisma.ts                          # PrismaClient singleton
-  lib/utils.ts                           # cn(), formatCurrency()
-  prisma/schema.prisma                   # Prisma schema (SQLite)
-  prisma/dev.db                          # local SQLite data
+  app/page.tsx                          # main tabbed UI (dashboard/assets/procurement/reports/settings)
+  app/api/assets/route.ts               # GET list (search/filter/paginate) + POST create
+  app/api/assets/[id]/route.ts          # GET / PUT / DELETE single asset
+  app/api/auth/route.ts                 # POST login (session cookie) / GET session / DELETE logout
+  app/api/users/{route,[id]}/route.ts   # user management (RBAC)
+  app/api/dashboard/route.ts            # dashboard KPI + chart data
+  app/api/reports/assets-pdf/route.ts   # PDF report
+  components/asset-catalog-workspace.tsx # asset table + CRUD modal (CURRENT FOCUS)
+  components/executive-dashboard.tsx     # dashboard + Recharts
+  components/{planning,procurement-flow,lifecycle,master-data,user-management}-*.tsx # workspaces
+  lib/prisma.ts                         # PrismaClient singleton (lazy init)
+  lib/utils.ts                          # cn() + formatCurrency()
+  lib/{auth,seed,csv,excel-import,pdf-report,procurement-flow,users,...} # domain/logic
+  prisma/schema.prisma                  # LIVE SQLite schema (what the app uses)
+  prisma/dev.db                         # local SQLite data
+  prisma/phase2.prisma                  # Phase-2 MySQL design (NOT applied to any DB)
+  backend/                              # separate Fastify + RSA-JWT service (needs config, not on a DB)
+  docs/                                 # 13 design docs - READ the relevant one before changing a module
+  scripts/ + public/sw.js               # offline static export + Service Worker
 
 ## CRITICAL - Asset field names (do NOT invent others)
   id, hospitalId, wardId, receiptId?, assetNo, name, status(ENUM), version, needsReview, cost
   status enum: AVAILABLE | IN_USE | REPAIR | QUARANTINED | DISPOSED
+  user.role enum (UserRole): ADMIN | WAREHOUSE | WARD | AUDITOR
   wrong -> right: assetName->name, assetNumber->assetNo, department->wardId, unitPrice->cost
 
-## Current status
-  DONE:  Feature 1 Executive Dashboard + Charts
-  DONE:  Feature 2 Asset CRUD (API + UI)
-  NEXT:  Feature 3 Search + Filter + Pagination UI  (in components/asset-catalog-workspace.tsx)
-  TODO:  4 PDF export, 5 Login+RBAC, 6 Approval workflow, 7 Excel import,
-         8 Multi-hospital, 9 Mobile, 10 AI assistant (Ollama)
+## AUTH (important - verified this session)
+  - POST /api/auth { staffCode, password } -> sets session cookie; 401 on bad creds.
+  - staffCode is .toUpperCase() on the SERVER before lookup: "admin" == "ADMIN".
+  - Roles: ADMIN (all), WAREHOUSE (all assets), WARD (only wards in user.wards), AUDITOR (read-only).
+  - Seeded (password: uth12345): ADMIN, WARE-01, WARD-01, AUDIT-01  (see lib/seed.ts).
+  - Every login attempt is written to UserLoginLog.
+
+## Feature status (honest)
+  DONE (on SQLite, wired to app): Dashboard+charts, Asset CRUD, Login+RBAC, user management,
+      asset numbering, CSV import (client-side: lib/csv.mjs + excel-import.ts), PDF export (assets),
+      system log, regulatory baseline, planning/procurement/finance/accounting/legal workspaces.
+  DESIGN-ONLY (not on any DB): prisma/phase2.prisma (MySQL 15-step), backend/ (RSA-JWT service).
+  TODO: Multi-hospital (hospitalId is single "UTH"), AI Assistant (Ollama), real-MySQL
+      transaction/rollback/concurrency/trigger tests, real device / HOSxP / e-GP integration, OCR/RFID.
 
 ## Conventions
-  - Button variant: only default | secondary | ghost (no "outline")
+  - Button variant: only default | secondary | ghost  (NO "outline")
   - Currency: formatCurrency() from lib/utils.ts
-  - crypto.randomUUID(): add a fallback polyfill (browser HTTP context)
-  - Components: named export + default export
-  - Verify by running the relevant code and/or npm test
+  - Components: named export AND export default (some files import both ways)
+  - crypto.randomUUID(): add a fallback polyfill in browser HTTP context
+  - After editing prisma/schema.prisma: run npx prisma generate
+  - Read the matching docs/ file before changing a module
+
+## Repo notes
+  - prisma/dev.db is COMMITTED as a binary (SQLite data lives in git).
+  - seed-uth-users.mjs + set-admin.mjs are committed top-level helpers
+    (consider moving into scripts/).
+  - The 4 seeded users (ADMIN/WARE-01/WARD-01/AUDIT-01) were added to dev.db
+    this session (password uth12345).

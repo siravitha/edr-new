@@ -1,41 +1,63 @@
 ﻿# UTH Smart Assets - Project Context
 
-> Hospital Asset Management system ("UTH Smart Assets").
-> Read this file first before working on any feature.
+> Hospital Asset Management system ("UTH Smart Assets") for a hospital
+> planning -> procurement -> finance -> accounting -> legal workflow + asset registry.
+> Read this first before working on any feature. Keep it in sync with AGENTS.md.
 
 ## Tech Stack
-- Framework: Next.js 16.4.3 (App Router) + React 19
-- Language: TypeScript (frontend + API routes) / JavaScript .mjs (some domain libs)
-- DB: SQLite via Prisma ORM v6 - file: prisma/dev.db
-- Styling: Tailwind CSS 4
-- Charts: Recharts v3
-- UI primitives: components/ui/ (button, card, etc) - Radix slot + CVA
+- Framework: Next.js 16 (App Router) + React 19, output: 'export' (static) in production
+- Language: TypeScript (app + most domain libs) and some JavaScript .mjs libs in lib/
+- DB (LIVE): SQLite via Prisma ORM v6 -> prisma/dev.db (schema: prisma/schema.prisma)
+- DB (DESIGN, not in use): prisma/phase2.prisma (MySQL, 15-step cycle) - NOT applied to any DB
+- Backend service (separate): backend/ = Fastify + RSA-JWT (needs issuer/aud/key config; not on a DB)
+- Styling: Tailwind CSS 4   -   Charts: Recharts v3   -   UI primitives: components/ui/ (Radix + CVA)
 - Testing: node --test  (npm test -> node --test tests/*.test.mjs)
+- Offline: scripts/prepare-offline.mjs (static export) + public/sw.js (Service Worker + IndexedDB)
 - PM: npm
 
 ## Run / Verify
-    npm run dev          # dev server (hostname 127.0.0.1)
+    npm run dev          # dev server (127.0.0.1:3001)
     npm run build        # next build --webpack + offline bundle
+    npm start            # serve static export (scripts/serve.mjs)
     npm test             # node --test
     npx prisma generate  # after editing prisma/schema.prisma
-- REAL SERVER: DGX Spark at http://192.168.1.224:3001  (view results in browser)
-- WORKFLOW: edit -> git push -> (DGX) git pull -> dev server HMR reload -> check browser
+- REAL SERVER (remote): DGX Spark at http://192.168.1.224:3001 - view results in a browser.
+- WORKFLOW: edit -> git push -> (DGX) git pull -> dev server HMR reload -> check browser.
+- NOTE: assets/users/dashboard read/write prisma/dev.db (SQLite). The 15-step cycle + most
+  workspaces are DEMO state (in-memory / IndexedDB) and reset when leaving - that is by design
+  for the prototype, NOT a bug.
 
 ## Key Files
 | File | Role |
 |------|------|
-| app/page.tsx | Main page, tabbed interface, tab menu |
+| app/page.tsx | Main page, AuthGate + tabs (dashboard/assets/procurement/reports/settings) |
 | app/api/assets/route.ts | Asset list (GET: search+filter+pagination) + create (POST) |
-| app/api/assets/[id]/route.ts | Asset single GET / PUT (update) / DELETE |
+| app/api/assets/[id]/route.ts | Asset single GET / PUT / DELETE |
+| app/api/auth/route.ts | Login (POST, sets cookie) / session (GET) / logout (DELETE) |
+| app/api/users/{route,[id]}/route.ts | User management (list/create/update/delete), RBAC |
 | app/api/dashboard/route.ts | Dashboard KPIs + chart data |
-| components/asset-catalog-workspace.tsx | Asset table UI + CRUD modal |
+| app/api/reports/assets-pdf/route.ts | PDF report (assets) |
+| components/asset-catalog-workspace.tsx | Asset table UI + CRUD modal (CURRENT FOCUS) |
 | components/executive-dashboard.tsx | Dashboard + charts (Recharts) |
+| components/procurement-flow-workspace.tsx | 15-step cycle (DEMO) |
+| components/{planning,lifecycle,master-data,user-management,system-log,regulatory}-*.tsx | workspaces |
 | lib/prisma.ts | PrismaClient singleton (lazy init) |
+| lib/auth.mjs / lib/users.mjs | session + user logic |
+| lib/csv.mjs / lib/excel-import.ts | CSV/Excel import (client-side, no /api/csv route) |
+| lib/pdf-report.ts / lib/pdf-server.ts | PDF generation |
+| lib/procurement-flow.ts | 15-step cycle domain logic |
+| lib/seed.ts | Seed test users + data |
 | lib/utils.ts | cn() + formatCurrency() |
-| prisma/schema.prisma | Prisma schema |
-| lib/seed.ts | Seed test data |
+| prisma/schema.prisma | LIVE SQLite schema |
+| prisma/phase2.prisma | Phase-2 MySQL design (not used by the app) |
+| docs/ | 13 design docs - read the relevant one before changing a module |
 
-## SCHEMA - Asset (use these EXACT field names)
+## SCHEMA (prisma/schema.prisma - SQLite, LIVE)
+Enums: AssetStatus, UserRole(ADMIN|WAREHOUSE|WARD|AUDITOR)
+Models: Plan, PurchaseOrder, POLine, ReceiptLine, Asset, PaymentClaim,
+        JournalEntry, WorkflowException, AuditLog, SyncReceipt,
+        User, UserWard, UserLoginLog, ConflictCase
+
     model Asset {
       id          String @id @default(uuid())
       hospitalId  String
@@ -43,74 +65,81 @@
       receiptId   String?         // optional FK -> ReceiptLine
       assetNo     String          // NOT "assetNumber"
       name        String          // NOT "assetName"
-      status      AssetStatus @default(AVAILABLE)   // ENUM, NOT free string
+      status      AssetStatus @default(AVAILABLE)   // ENUM, not free text
       version     Int @default(0)
       needsReview Boolean @default(false)
       cost        Decimal         // NOT "unitPrice"
-      receipt     ReceiptLine?    // optional relation
+      receipt     ReceiptLine?
+      conflicts   ConflictCase[]
+      journals    JournalEntry[]
       @@unique([hospitalId, assetNo])
       @@index([hospitalId, wardId, status])
     }
-    enum AssetStatus {
-      AVAILABLE
-      IN_USE
-      REPAIR
-      QUARANTINED
-      DISPOSED
+    model User {
+      id, hospitalId, staffCode, fullName, role UserRole, passwordHash,
+      active Boolean @default(true), wards UserWard[], loginLogs UserLoginLog[]
+      @@unique([hospitalId, staffCode])
     }
 
 COMMON FIELD MISTAKES TO AVOID:
-  assetName    -> use: name
-  assetNumber  -> use: assetNo
-  department   -> use: wardId
-  location     -> use: wardId
-  unitPrice    -> use: cost
-  status       -> MUST be one of the enum values above
+  assetName   -> name      assetNumber -> assetNo
+  department  -> wardId    location    -> wardId
+  unitPrice   -> cost      status      -> one of the AssetStatus enum values
+NOTE: the datasource url in schema.prisma is an ABSOLUTE file path
+  (file:///home/admin/Working/edr-new/prisma/dev.db). Keep it absolute.
 
-## API Contract
+## API Contract (live)
 GET /api/assets?page&pageSize&search&status&wardId&hospitalId
-  -> { assets: Asset[], total, page, pageSize, totalPages }
-  - search : matches assetNo OR name (case-insensitive contains)
-  - status : exact enum value
-  - default pageSize 25, max 100
+  -> { assets, total, page, pageSize, totalPages }
+  - search: assetNo OR name (case-insensitive)  - status: exact enum  - pageSize default 25, max 100
+POST /api/assets            body { hospitalId, wardId?, assetNo, name, cost?, status? }
+  -> 201 { asset } | 400 (missing) | 409 (duplicate assetNo)
+PUT /api/assets/[id]        body { name?, status?, cost?, wardId?, needsReview? } -> bumps version
+DELETE /api/assets/[id]     -> deletes asset
+GET/POST/DELETE /api/auth   -> session cookie; 401 on bad login
+GET/POST /api/users, GET/PUT/DELETE /api/users/[id]   -> user management
+GET /api/dashboard, GET /api/reports/assets-pdf
+NOTE: CSV import is CLIENT-SIDE (components/legacy-excel-import.tsx + lib/csv.mjs + excel-import.ts);
+      there is NO /api/csv route.
 
-POST /api/assets
-  body: { hospitalId, wardId?, assetNo, name, cost?, status? }
-  -> 201 { asset } | 400 (missing hospitalId/assetNo/name) | 409 (duplicate assetNo)
+## AUTH + RBAC (verified)
+- POST /api/auth { staffCode, password }: staffCode is .toUpperCase() server-side before lookup
+  ("admin" == "ADMIN"). 401 on bad creds; success writes a UserLoginLog row.
+- Roles: ADMIN (all), WAREHOUSE (all assets), WARD (scoped to user.wards wardIds), AUDITOR (read-only).
+- Seeded users (password uth12345): ADMIN, WARE-01 (WAREHOUSE), WARD-01 (WARD), AUDIT-01 (AUDITOR).
+- Session is a signed cookie; /api/auth GET returns the current public user (or 401).
 
-PUT /api/assets/[id]
-  body: { name?, status?, cost?, wardId?, needsReview? }
-  -> updates + bumps version + 1
-
-DELETE /api/assets/[id]
-  -> deletes asset
-
-## Current Feature Status
-| # | Feature | Status |
-|---|---------|--------|
-| 1 | Executive Dashboard + Charts (Recharts) | DONE |
-| 2 | Asset CRUD (register form)            | DONE (API + UI) |
-| 3 | Search + Filter + Pagination UI        | NEXT (in progress) |
-| 4 | PDF Report Export                      | TODO |
-| 5 | Login + RBAC                           | TODO |
-| 6 | Approval Workflow (multi-step)         | TODO |
-| 7 | Excel Import (drag-drop)               | TODO |
-| 8 | Multi-Hospital (multi-tenant)          | TODO |
-| 9 | Mobile responsive                      | TODO |
-| 10| AI Assistant (DGX Ollama)              | TODO |
-
-## Feature 3 (IN PROGRESS) - Search + Filter + Pagination UI
-The API already supports it (GET /api/assets accepts search/status/wardId + pagination).
-Finish the UI in components/asset-catalog-workspace.tsx:
-  [ ] Debounced search input  -> binds to ?search=
-  [ ] Status filter dropdown  -> the 5 enum values
-  [ ] Ward filter             -> ?wardId=
-  [ ] Full pagination         -> prev/next + page numbers + "showing X-Y of Z"
-  [ ] Call /api/assets/ for real and render the response
+## Feature status (honest, as of 2026-03-11)
+| Area | Status |
+|------|--------|
+| Executive Dashboard + Charts (Recharts) | DONE (live) |
+| Asset CRUD (register/edit/delete) | DONE (API + UI, live SQLite) |
+| Search + Filter + Pagination (assets) | DONE |
+| Login + RBAC (4 roles + ward scoping) | DONE |
+| User management (UI + API) | DONE |
+| Asset numbering | DONE |
+| CSV/Excel import (client-side) | DONE (prototype) |
+| PDF export (assets) | DONE |
+| System log + audit (UserLoginLog/AuditLog) | DONE |
+| Planning / Procurement / Finance / Accounting / Legal workspaces | WORKING PROTOTYPE (demo state) |
+| 15-step procurement cycle (lib/procurement-flow.ts) | WORKING PROTOTYPE (in-memory) |
+| Multi-hospital (multi-tenant) | TODO (hospitalId is single "UTH") |
+| AI Assistant (Ollama) | TODO |
+| Real MySQL: transaction/rollback/concurrency/trigger tests | TODO (open in VERIFICATION.md) |
+| Real device / HOSxP / e-GP / OCR / RFID integration | TODO (prototype only) |
 
 ## Conventions
-- Components use named export AND export default (some files import both ways)
-- Button variant only supports: default | secondary | ghost  (NO "outline")
-- Currency display: use formatCurrency() from lib/utils.ts
-- crypto.randomUUID(): always add a fallback polyfill (browser HTTP context)
-- After editing prisma/schema.prisma, run: npx prisma generate
+- Components: named export AND export default (some files import both ways)
+- Button variant: only default | secondary | ghost  (NO "outline")
+- Currency display: formatCurrency() from lib/utils.ts
+- crypto.randomUUID(): add a fallback polyfill in browser HTTP context
+- After editing prisma/schema.prisma: npx prisma generate
+- Read the matching docs/ file before changing a module
+
+## Repo notes
+- prisma/dev.db is COMMITTED as a binary (SQLite data lives in git); the 4
+  seeded users (ADMIN/WARE-01/WARD-01/AUDIT-01) were added to it this session.
+- seed-uth-users.mjs + set-admin.mjs are committed top-level helpers
+  (consider moving into scripts/).
+- Uncommitted right now: AGENTS.md, .continue/rules/project-context.md,
+  prisma/dev.db.
