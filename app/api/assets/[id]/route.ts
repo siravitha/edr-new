@@ -1,20 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../../../lib/prisma";
+import { getActor, requireAction, singleAssetOk, type AuthError } from "../../../../lib/api-guard";
 
 interface Params { params: Promise<{ id: string }> }
 
-export async function GET(_request: NextRequest, { params }: Params) {
+function reject(e: AuthError) {
+  return NextResponse.json({ error: e.error, message: e.message }, { status: e.status });
+}
+
+export async function GET(request: NextRequest, { params }: Params) {
+  const auth = await getActor(request);
+  if (!auth.ok) return reject(auth);
+  const gate = requireAction(auth, "assets:read");
+  if (!gate.ok) return reject(gate);
+
   const { id } = await params;
   const asset = await prisma.asset.findUnique({ where: { id } });
-  if (!asset) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const check = singleAssetOk(gate.value, asset);
+  if (!check.ok) return reject(check);
   return NextResponse.json({ asset });
 }
 
 export async function PUT(request: NextRequest, { params }: Params) {
+  const auth = await getActor(request);
+  if (!auth.ok) return reject(auth);
+  const gate = requireAction(auth, "assets:update");
+  if (!gate.ok) return reject(gate);
+
   const { id } = await params;
   const existing = await prisma.asset.findUnique({ where: { id } });
-  if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const check = singleAssetOk(gate.value, existing);
+  if (!check.ok) return reject(check);
 
   const body = await request.json();
   const { name, status, cost, wardId, needsReview } = body;
@@ -34,10 +51,16 @@ export async function PUT(request: NextRequest, { params }: Params) {
   return NextResponse.json({ asset });
 }
 
-export async function DELETE(_request: NextRequest, { params }: Params) {
+export async function DELETE(request: NextRequest, { params }: Params) {
+  const auth = await getActor(request);
+  if (!auth.ok) return reject(auth);
+  const gate = requireAction(auth, "assets:delete");
+  if (!gate.ok) return reject(gate);
+
   const { id } = await params;
   const existing = await prisma.asset.findUnique({ where: { id } });
-  if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const check = singleAssetOk(gate.value, existing);
+  if (!check.ok) return reject(check);
 
   await prisma.asset.delete({ where: { id } });
   return NextResponse.json({ deleted: true });
