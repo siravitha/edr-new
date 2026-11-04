@@ -188,6 +188,15 @@ export function AssetCatalogWorkspace(_props: AssetCatalogWorkspaceProps = {}) {
   const handleNew = () => { setEditing(null); setShowForm(true); setError(""); setSuccess(""); };
   const closeForm = () => { setShowForm(false); setEditing(null); };
 
+  const handleExport = () => {
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    if (statusFilter) params.set("status", statusFilter);
+    if (wardFilter) params.set("wardId", wardFilter);
+    const qs = params.toString();
+    window.open(`/api/assets/export${qs ? "?" + qs : ""}`, "_blank");
+  };
+
   const statusBadge = (s: AssetStatus) => (
     <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", statusStyles[s] || "bg-blue-100 text-blue-700")}>
       {statusLabels[s] || s}
@@ -208,6 +217,7 @@ export function AssetCatalogWorkspace(_props: AssetCatalogWorkspaceProps = {}) {
           <Button variant="secondary" onClick={handleExportPdf} disabled={exporting}>
             {exporting ? "Exporting..." : "Export PDF"}
           </Button>
+          <Button variant="secondary" onClick={handleExport}>Export</Button>
           <Button onClick={handleNew}>+ New Asset</Button>
         </div>
       </div>
