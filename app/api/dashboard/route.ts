@@ -1,7 +1,19 @@
 import { NextResponse } from "next/server";
 import { prisma } from "../../../lib/prisma";
+import { getActor, requireAction, type AuthError } from "../../../lib/api-guard";
+
+function reject(e: AuthError) {
+  return NextResponse.json({ error: e.error, message: e.message }, { status: e.status });
+}
 
 export async function GET(request: Request) {
+  // RBAC: dashboard exposes asset/finance KPIs — require an authenticated session.
+  // All roles (ADMIN|WAREHOUSE|WARD|AUDITOR) hold "assets:read", so no valid user is blocked.
+  const auth = await getActor(request);
+  if (!auth.ok) return reject(auth);
+  const gate = requireAction(auth, "assets:read");
+  if (!gate.ok) return reject(gate);
+
   try {
     const { searchParams } = new URL(request.url);
     const hospitalId = searchParams.get("hospitalId") || "";
