@@ -10,12 +10,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getFlowState, commitFlowState, FlowConflictError, type FlowEventInput } from "@/lib/flow-store";
 import type { FlowState } from "@/lib/procurement-flow";
-import { getActor, requireAction } from "@/lib/api-guard";
+import { getActor, requireAction, type AuthError } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
 const READ_ACTION = "approvals:read";
 const WRITE_ACTION = "approvals:decide";
+
+function reject(e: AuthError) {
+  return NextResponse.json({ error: e.error, message: e.message }, { status: e.status });
+}
 
 // The client posts the whole FlowState under `body.flow`; accept `body.state` as a backwards-compat alias.
 function stateFromBody(body: Record<string, unknown>): FlowState | undefined {
@@ -26,9 +30,9 @@ function stateFromBody(body: Record<string, unknown>): FlowState | undefined {
 
 export async function GET(req: NextRequest) {
   const auth = await getActor(req);
-  if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const denied = requireAction(auth, READ_ACTION);
-  if (denied) return denied;
+  if (!auth.ok) return reject(auth);
+  const gate = requireAction(auth, READ_ACTION);
+  if (!gate.ok) return reject(gate);
 
   const hospitalId = req.nextUrl.searchParams.get("hospitalId");
   if (!hospitalId) return NextResponse.json({ error: "hospitalId is required" }, { status: 400 });
@@ -39,9 +43,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const auth = await getActor(req);
-  if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const denied = requireAction(auth, WRITE_ACTION);
-  if (denied) return denied;
+  if (!auth.ok) return reject(auth);
+  const gate = requireAction(auth, WRITE_ACTION);
+  if (!gate.ok) return reject(gate);
 
   let body: Record<string, unknown>;
   try {

@@ -3,17 +3,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { listFlowEvents } from "@/lib/flow-store";
-import { getActor, requireAction } from "@/lib/api-guard";
+import { getActor, requireAction, type AuthError } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
 const READ_ACTION = "approvals:read";
 
+function reject(e: AuthError) {
+  return NextResponse.json({ error: e.error, message: e.message }, { status: e.status });
+}
+
 export async function GET(req: NextRequest) {
   const auth = await getActor(req);
-  if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const denied = requireAction(auth, READ_ACTION);
-  if (denied) return denied;
+  if (!auth.ok) return reject(auth);
+  const gate = requireAction(auth, READ_ACTION);
+  if (!gate.ok) return reject(gate);
 
   const hospitalId = req.nextUrl.searchParams.get("hospitalId");
   if (!hospitalId) return NextResponse.json({ error: "hospitalId is required" }, { status: 400 });
